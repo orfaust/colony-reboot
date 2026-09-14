@@ -1,0 +1,122 @@
+[
+  {
+    "id": "control_unit",
+    "name_key": "building_control_unit_name",
+    "description_key": "building_control_unit_description",
+    "code": "CU",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 0, "g": 86, "b": 179 },
+    "power_need_kw": 0,
+    "power_output_kw": 0,
+    "needs": [],
+    "produces": []
+  },
+  {
+    "id": "solar_panel",
+    "name_key": "building_solar_panel_name",
+    "description_key": "building_solar_panel_description",
+    "code": "SP",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 170, "g": 136, "b": 14 },
+    "power_need_kw": 0,
+    "power_output_kw": 16,
+    "needs": [],
+    "produces": []
+  },
+  {
+    "id": "robots_warehouse",
+    "name_key": "building_robots_warehouse_name",
+    "description_key": "building_robots_warehouse_description",
+    "code": "RW",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 7, "g": 162, "b": 82 },
+    "power_need_kw": 7,
+    "power_output_kw": 0,
+    "needs": [],
+    "produces": []
+  },
+  {
+    "id": "water_collector",
+    "name_key": "building_water_collector_name",
+    "description_key": "building_water_collector_description",
+    "code": "WC",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 0, "g": 176, "b": 179 },
+    "power_need_kw": 3,
+    "power_output_kw": 0,
+    "needs": [],
+    "produces": [{ "resource_id": "water", "time_per_unit": 0.02 }]
+  },
+  {
+    "id": "greenhouse",
+    "name_key": "building_greenhouse_name",
+    "description_key": "building_greenhouse_description",
+    "code": "GH",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 100, "g": 170, "b": 14 },
+    "power_need_kw": 8,
+    "power_output_kw": 0,
+    "needs": [{ "resource_id": "water", "amount_per_unit": 3 }],
+    "produces": [{ "resource_id": "vegetables", "time_per_unit": 6 }]
+  },
+  {
+    "id": "meals_factory",
+    "name_key": "building_meals_factory_name",
+    "description_key": "building_meals_factory_description",
+    "code": "MF",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 90, "g": 12, "b": 39 },
+    "power_need_kw": 5,
+    "power_output_kw": 0,
+    "needs": [
+      { "resource_id": "vegetables", "amount_per_unit": 2 },
+      { "resource_id": "water", "amount_per_unit": 1 }
+    ],
+    "produces": [{ "resource_id": "meals", "time_per_unit": 3 }]
+  },
+  {
+    "id": "mining_unit",
+    "name_key": "building_mining_unit_name",
+    "description_key": "building_mining_unit_description",
+    "code": "MU",
+    "width": 1,
+    "height": 1,
+    "color": { "r": 88, "g": 69, "b": 104 },
+    "power_need_kw": 12,
+    "power_output_kw": 0,
+    "needs": [{ "resource_id": "water", "amount_per_unit": 2 }],
+    "produces": [{ "resource_id": "ores", "time_per_unit": 5 }]
+  },
+  {
+    "id": "ore_refinery",
+    "name_key": "building_ore_refinery_name",
+    "description_key": "building_ore_refinery_description",
+    "code": "OR",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 92, "g": 92, "b": 92 },
+    "power_need_kw": 9,
+    "power_output_kw": 0,
+    "needs": [{ "resource_id": "ores", "amount_per_unit": 2 }],
+    "produces": [{ "resource_id": "materials", "time_per_unit": 2 }]
+  },
+  {
+    "id": "humans_residence",
+    "name_key": "building_humans_residence_name",
+    "description_key": "building_humans_residence_description",
+    "code": "HR",
+    "width": 1.5,
+    "height": 1.5,
+    "color": { "r": 199, "g": 106, "b": 0 },
+    "power_need_kw": 10,
+    "power_output_kw": 0,
+    "needs": [],
+    "produces": []
+  }
+]

@@ -1,0 +1,9 @@
+/build/
+*.exe
+*.pdb
+*.obj
+
+# Local tooling and generated output
+/graphify-out/
+/.claude/
+/.pi/

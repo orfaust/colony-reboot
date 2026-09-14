@@ -1,0 +1,21 @@
+{
+  "name": "colony-reboot-manage",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Web tool to visually edit the JSON files in ../assets",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "level": 0,
+  "buildings": [
+    {
+      "id": "CU1",
+      "building_id": "control_unit",
+      "position": {
+        "x": 3,
+        "y": -1
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "SP1",
+      "building_id": "solar_panel",
+      "position": {
+        "x": 6,
+        "y": -4
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "SP2",
+      "building_id": "solar_panel",
+      "position": {
+        "x": 8,
+        "y": -4
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "RW1",
+      "building_id": "robots_warehouse",
+      "position": {
+        "x": 3,
+        "y": 3
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "WC1",
+      "building_id": "water_collector",
+      "position": {
+        "x": -6,
+        "y": -3
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "GH1",
+      "building_id": "greenhouse",
+      "position": {
+        "x": -6,
+        "y": 3
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "SP3",
+      "building_id": "solar_panel",
+      "position": {
+        "x": 6,
+        "y": -2
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "SP4",
+      "building_id": "solar_panel",
+      "position": {
+        "x": 8,
+        "y": -2
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "GH2",
+      "building_id": "greenhouse",
+      "position": {
+        "x": -6,
+        "y": 1
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "MF1",
+      "building_id": "meals_factory",
+      "position": {
+        "x": -2,
+        "y": -4
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "MF2",
+      "building_id": "meals_factory",
+      "position": {
+        "x": 0,
+        "y": -4
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "MU1",
+      "building_id": "mining_unit",
+      "position": {
+        "x": 8.5,
+        "y": 4
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "OR1",
+      "building_id": "ore_refinery",
+      "position": {
+        "x": 6.5,
+        "y": 1.5
+      },
+      "health": 1,
+      "repairing": false
+    },
+    {
+      "id": "HR1",
+      "building_id": "humans_residence",
+      "position": {
+        "x": -2,
+        "y": 1
+      },
+      "health": 1,
+      "repairing": false
+    }
+  ]
+}

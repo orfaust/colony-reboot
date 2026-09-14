@@ -1,0 +1,37 @@
+[
+  {
+    "id": "water",
+    "name_key": "resource_water_name",
+    "description_key": "resource_water_description",
+    "unit_type_key": "unit_l",
+    "color": { "r": 0, "g": 179, "b": 255 }
+  },
+  {
+    "id": "vegetables",
+    "name_key": "resource_vegetables_name",
+    "description_key": "resource_vegetables_description",
+    "unit_type_key": "unit_kg",
+    "color": { "r": 0, "g": 138, "b": 0 }
+  },
+  {
+    "id": "meals",
+    "name_key": "resource_meals_name",
+    "description_key": "resource_meals_description",
+    "unit_type_key": "unit_kg",
+    "color": { "r": 140, "g": 24, "b": 64 }
+  },
+  {
+    "id": "ores",
+    "name_key": "resource_ores_name",
+    "description_key": "resource_ores_description",
+    "unit_type_key": "unit_kg",
+    "color": { "r": 48, "g": 48, "b": 48 }
+  },
+  {
+    "id": "materials",
+    "name_key": "resource_materials_name",
+    "description_key": "resource_materials_description",
+    "unit_type_key": "unit_kg",
+    "color": { "r": 200, "g": 200, "b": 200 }
+  }
+]
