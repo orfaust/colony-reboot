@@ -1,0 +1,20 @@
+[
+  {
+    "id": "worker",
+    "name_key": "subject_role_worker_name",
+    "color": { "r": 80, "g": 170, "b": 240 },
+    "sprite": "assets/sprites/roles/worker.png"
+  },
+  {
+    "id": "supervisor",
+    "name_key": "subject_role_supervisor_name",
+    "color": { "r": 228, "g": 7, "b": 62 },
+    "sprite": "assets/sprites/roles/supervisor.png"
+  },
+  {
+    "id": "repairer",
+    "name_key": "subject_role_repairer_name",
+    "color": { "r": 213, "g": 113, "b": 32 },
+    "sprite": "assets/sprites/roles/repairer.png"
+  }
+]

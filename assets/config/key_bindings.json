@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "menu_up": ["key:up"],
+  "menu_down": ["key:down"],
+  "activate": ["key:enter", "key:space"],
+  "back": ["key:escape"],
+  "select": ["mouse:left"],
+  "zoom_in": ["wheel:up"],
+  "zoom_out": ["wheel:down"],
+  "pan": ["mouse:right", "mouse:middle"],
+  "speed_up": ["key:e"],
+  "slow_down": ["key:q"]
+}

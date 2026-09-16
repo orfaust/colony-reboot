@@ -1,0 +1,32 @@
+[
+  {
+    "id": "space_station_1",
+    "code": "SS1",
+    "name_key": "space_station_1_name",
+    "resources": [],
+    "subjects": [
+      {
+        "subject_id": "human",
+        "capacity": 24
+      },
+      {
+        "subject_id": "robot",
+        "capacity": 18
+      }
+    ],
+    "ships": [
+      {
+        "ship_id": "human_transport_1",
+        "units": 2
+      },
+      {
+        "ship_id": "robot_transport_1",
+        "units": 1
+      },
+      {
+        "ship_id": "Emergency transport",
+        "units": 1
+      }
+    ]
+  }
+]

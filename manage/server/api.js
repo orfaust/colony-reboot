@@ -41,6 +41,17 @@ async function listJsonFiles(dir) {
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+// Browse existing PNG assets only; directory symlinks and file symlinks are not followed.
+export async function listSpritePaths(root = ASSETS_DIR, dir = root) {
+  const files = [];
+  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...await listSpritePaths(root, full));
+    else if (entry.isFile() && /\.png$/i.test(entry.name)) files.push(`assets/${path.relative(root, full).split(path.sep).join('/')}`);
+  }
+  return files.sort();
+}
+
 async function readBody(req) {
   const chunks = [];
   let size = 0;
@@ -76,6 +87,10 @@ export async function handleApi(req, res) {
   const url = new URL(req.url, 'http://localhost');
   if (!url.pathname.startsWith('/api/')) return false;
   try {
+    if (url.pathname === '/api/sprites' && req.method === 'GET') {
+      send(res, 200, { paths: await listSpritePaths() });
+      return true;
+    }
     if (url.pathname === '/api/files' && req.method === 'GET') {
       send(res, 200, { root: ASSETS_DIR, files: await listJsonFiles(ASSETS_DIR) });
       return true;

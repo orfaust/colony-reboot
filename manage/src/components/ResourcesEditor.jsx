@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useCatalogSelection } from './useCatalogSelection.js';
 import { ColorInput, CommitInput, Field, TextKeyInput } from './fields.jsx';
 import ExtraFields from './ExtraFields.jsx';
-import { BUILDINGS_PATH, resourceSchema } from '../lib/schema.js';
+import { followIdRename } from '../lib/textKeys.js';
+import { BUILDINGS_PATH, SUBJECTS_PATH, resourceSchema } from '../lib/schema.js';
 import { clone, isPlainObject, moveItem, objectItems, rgbToHex, uniqueName } from '../lib/object.js';
 
 function newResource(id) {
@@ -14,21 +15,29 @@ function newResource(id) {
   };
 }
 
-/** Building types whose needs or produces reference a resource id. */
-const usersOf = (buildings, id) =>
-  objectItems(buildings).filter((b) => [...(b.needs ?? []), ...(b.produces ?? [])].some((r) => r?.resource_id === id));
+/** Labels of the building and subject types whose needs or produces reference a resource id. */
+const usersOf = (ctx, id) => {
+  const uses = (list) => (Array.isArray(list) ? list : []).some((r) => r?.resource_id === id);
+  return [
+    ...objectItems(ctx.buildings).filter((b) => uses(b.needs) || uses(b.produces) || uses(b.storage)).map((b) => b.id),
+    ...objectItems(ctx.subjects).filter((s) => uses(s.needs)).map((s) => `subject ${s.id}`),
+  ];
+};
 
 function ResourceForm({ index, resource, data, onChange, ctx }) {
   const set = (field, value) => onChange({ ...resource, [field]: value }, `${index}.${field}`);
-  const users = usersOf(ctx.buildings, resource.id);
+  const users = usersOf(ctx, resource.id);
 
   const renameId = (next) => {
     next = next.trim();
     if (!next || data.some((r, i) => i !== index && r?.id === next)) return false;
-    onChange({ ...resource, id: next });
-    if (users.length && confirm(`${users.length} building type(s) reference "${resource.id}" (${users.map((b) => b.id).join(', ')}).\nUpdate them to "${next}"?`)) {
+    onChange({ ...followIdRename(resource, 'resource', resource.id, next, ctx), id: next });
+    if (users.length && confirm(`${users.length} type(s) reference "${resource.id}" (${users.join(', ')}).\nUpdate them to "${next}"?`)) {
       const swap = (list) => (Array.isArray(list) ? list.map((r) => (r?.resource_id === resource.id ? { ...r, resource_id: next } : r)) : list);
-      ctx.updateDoc(BUILDINGS_PATH, (buildings) => buildings.map((b) => (isPlainObject(b) ? { ...b, needs: swap(b.needs), produces: swap(b.produces) } : b)));
+      if (Array.isArray(ctx.buildings))
+        ctx.updateDoc(BUILDINGS_PATH, (buildings) => buildings.map((b) => (isPlainObject(b) ? { ...b, needs: swap(b.needs), produces: swap(b.produces), ...(Array.isArray(b.storage) ? { storage: swap(b.storage) } : {}) } : b)));
+      if (Array.isArray(ctx.subjects))
+        ctx.updateDoc(SUBJECTS_PATH, (subjects) => subjects.map((s) => (isPlainObject(s) ? { ...s, needs: swap(s.needs) } : s)));
     }
     return true;
   };
@@ -37,14 +46,14 @@ function ResourceForm({ index, resource, data, onChange, ctx }) {
     <div className="form">
       <ExtraFields value={resource} schema={resourceSchema} onChange={(v) => onChange(v)} />
       <div className="form-grid">
-        <Field label="ID" hint={users.length ? `Used by: ${users.map((b) => b.id).join(', ')}` : 'Not used by any building type'}>
+        <Field label="ID" hint={users.length ? `Used by: ${users.join(', ')}` : 'Not used by any building or subject type'}>
           <CommitInput value={resource.id ?? ''} onCommit={renameId} spellCheck={false} />
         </Field>
         <Field label="Color">
           <ColorInput value={resource.color} onChange={(v) => set('color', v)} />
         </Field>
         <Field label="Name key" wide>
-          <TextKeyInput value={resource.name_key} onChange={(v) => set('name_key', v)} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} />
+          <TextKeyInput value={resource.name_key} onChange={(v) => set('name_key', v)} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} onEditKey={ctx.onEditTextKey} onRenameKey={ctx.onRenameTextKey} />
         </Field>
         <Field label="Description key" wide>
           <TextKeyInput
@@ -52,10 +61,12 @@ function ResourceForm({ index, resource, data, onChange, ctx }) {
             onChange={(v) => set('description_key', v)}
             texts={ctx.texts}
             onCreateKey={ctx.onCreateTextKey}
+            onEditKey={ctx.onEditTextKey}
+            onRenameKey={ctx.onRenameTextKey}
           />
         </Field>
         <Field label="Unit key" wide>
-          <TextKeyInput value={resource.unit_type_key} onChange={(v) => set('unit_type_key', v)} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} />
+          <TextKeyInput value={resource.unit_type_key} onChange={(v) => set('unit_type_key', v)} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} onEditKey={ctx.onEditTextKey} onRenameKey={ctx.onRenameTextKey} />
         </Field>
       </div>
     </div>
@@ -63,7 +74,7 @@ function ResourceForm({ index, resource, data, onChange, ctx }) {
 }
 
 export default function ResourcesEditor({ data, onChange, ctx }) {
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelected] = useCatalogSelection(ctx.gridSelection);
   if (!Array.isArray(data)) return <p className="empty">Expected an array of resources. Fix the file in the JSON tab.</p>;
   const current = selected !== null && selected < data.length ? selected : null;
   const resource = current !== null ? data[current] : null;
@@ -80,8 +91,8 @@ export default function ResourcesEditor({ data, onChange, ctx }) {
   };
   const remove = (index) => {
     const id = data[index]?.id;
-    const users = usersOf(ctx.buildings, id);
-    const warning = users.length ? `\nIt is still used by: ${users.map((b) => b.id).join(', ')}.` : '';
+    const users = usersOf(ctx, id);
+    const warning = users.length ? `\nIt is still used by: ${users.join(', ')}.` : '';
     if (!confirm(`Delete resource "${id}"?${warning}`)) return;
     onChange(data.filter((_, i) => i !== index));
     setSelected(null);
@@ -95,7 +106,7 @@ export default function ResourcesEditor({ data, onChange, ctx }) {
     <div className="master-detail">
       <aside className="panel list-panel">
         <div className="list-header">
-          <h3>Resources ({data.length})</h3>
+          <h3><button type="button" className="catalog-grid-title" onClick={ctx.onOpenGrid} title="Open editable grid">Resources ({data.length})</button></h3>
           <button type="button" className="btn tiny" onClick={add}>
             + New
           </button>

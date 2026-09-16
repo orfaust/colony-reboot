@@ -1,0 +1,47 @@
+[
+  {
+    "id": "human_transport_1",
+    "code": "HT1",
+    "sprite": "",
+    "width": 1,
+    "height": 1,
+    "max_speed": 500,
+    "max_speed_hours": 6,
+    "units_per_hour": 4,
+    "color": { "r": 219, "g": 72, "b": 150 },
+    "name_key": "ship_human_transport_name",
+    "type": "transport",
+    "subjects": [{ "subject_id": "human", "capacity": 100 }]
+  },
+  {
+    "id": "robot_transport_1",
+    "code": "RT1",
+    "sprite": "",
+    "width": 1,
+    "height": 1,
+    "max_speed": 380,
+    "max_speed_hours": 11,
+    "units_per_hour": 12,
+    "color": { "r": 33, "g": 159, "b": 176 },
+    "name_key": "ship_robot_transport_name",
+    "type": "transport",
+    "subjects": [{ "subject_id": "robot", "capacity": 50 }]
+  },
+  {
+    "id": "Emergency transport",
+    "code": "ET",
+    "color": { "r": 255, "g": 97, "b": 97 },
+    "name_key": "ship_emergency_name",
+    "type": "emergency",
+    "sprite": "",
+    "width": 1,
+    "height": 1,
+    "max_speed": 2000,
+    "max_speed_hours": 4,
+    "units_per_hour": 4,
+    "subjects": [
+      { "subject_id": "human", "capacity": 12 },
+      { "subject_id": "robot", "capacity": 6 }
+    ]
+  }
+]

@@ -1,7 +1,10 @@
-import { useState } from 'react';
-import { ColorInput, CommitInput, Field, NumberInput, RefSelect, TextInput, TextKeyInput } from './fields.jsx';
+import PathInput from './PathInput.jsx';
+import { useCatalogSelection } from './useCatalogSelection.js';
+import { Checkbox, ColorInput, CommitInput, Field, NumberInput, UnitsPerHourInput, RefSelect, TextInput, TextKeyInput } from './fields.jsx';
 import ExtraFields from './ExtraFields.jsx';
-import { buildingTypeSchema } from '../lib/schema.js';
+import BuildingSubjectRoles, { newBuildingRoles } from './BuildingSubjectRoles.jsx';
+import { followIdRename } from '../lib/textKeys.js';
+import { NEED_AMOUNT_FIELDS, PRODUCT_RATE_FIELDS, SPRITE_PATH_ERROR, validSpritePath, buildingTypeSchema } from '../lib/schema.js';
 import { WORLD_SCALE } from '../lib/game.js';
 import { clone, contrastText, isPlainObject, moveItem, objectItems, rgbToHex, uniqueName } from '../lib/object.js';
 
@@ -15,6 +18,7 @@ function newBuilding(id, data) {
   const initials = id.split('_').map((p) => p.charAt(0).toUpperCase()).join('').slice(0, 3) || 'NB';
   return {
     id,
+    sprite: '',
     name_key: `building_${id}_name`,
     description_key: `building_${id}_description`,
     code: uniqueCode(initials, data.map((b) => b?.code)),
@@ -23,8 +27,16 @@ function newBuilding(id, data) {
     color: { r: 200, g: 200, b: 200 },
     power_need_kw: 0,
     power_output_kw: 0,
+    always_on: false,
+    warmup_time: 0,
+    cooldown_time: 0,
+    min_operative_health: 0,
+    materials_amount: 0,
+    subject_roles: newBuildingRoles(),
+    residents: null,
     needs: [],
     produces: [],
+    storage: [],
   };
 }
 
@@ -47,34 +59,115 @@ function SizePreview({ building }) {
   );
 }
 
-function RecipeList({ title, addLabel, items, amountField, amountHint, resources, onChange }) {
+/**
+ * `amountFields` are alternatives: each item stores exactly one, chosen with a select when there are several.
+ * `extraFields` ({ field, label }) are additional numbers every item stores, shown on a second line.
+ */
+export function RecipeList({ title, addLabel, items, amountFields, amountHint, extraFields = [], resources, onChange }) {
   const list = Array.isArray(items) ? items : [];
   const options = resources.map((r) => ({ value: r.id, label: r.id }));
   const patch = (i, change) => onChange(list.map((it, j) => (j === i ? { ...it, ...change } : it)));
+  const fieldOf = (item) => amountFields.find((f) => item?.[f] !== undefined) ?? amountFields[0];
+  const switchField = (i, next) =>
+    onChange(
+      list.map((it, j) => {
+        if (j !== i) return it;
+        const rest = Object.fromEntries(Object.entries(it).filter(([k]) => !amountFields.includes(k)));
+        return { ...rest, [next]: it[fieldOf(it)] };
+      }),
+    );
   return (
     <fieldset className="recipe">
       <legend>{title}</legend>
       {list.length === 0 && <p className="empty small">None</p>}
-      {list.map((item, i) => (
+      {list.map((item, i) => {
+        const field = fieldOf(item);
+        return (
         <div className="recipe-row" key={i}>
           <RefSelect value={item.resource_id} options={options} onChange={(v) => patch(i, { resource_id: v })} />
-          <NumberInput value={item[amountField]} min={0} step={0.01} title={amountField} onChange={(v) => patch(i, { [amountField]: v })} />
-          <span className="unit-label">{amountHint(item)}</span>
+          {field === 'units_per_hour' ? (
+            <UnitsPerHourInput value={item[field]} min={0} title={field} onChange={(v) => patch(i, { [field]: v })} />
+          ) : (
+            <NumberInput value={item[field]} min={0} title={field} onChange={(v) => patch(i, { [field]: v })} />
+          )}
+          {amountFields.length > 1 ? (
+            <select className="input unit-label" value={field} title="Amount field" onChange={(e) => switchField(i, e.target.value)}>
+              {amountFields.map((f) => (
+                <option key={f} value={f}>
+                  {amountHint(item, f)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="unit-label">{amountHint(item, field)}</span>
+          )}
           <button type="button" className="btn tiny ghost danger" onClick={() => onChange(list.filter((_, j) => j !== i))}>
             ✕
           </button>
+          {extraFields.length > 0 && (
+            <div className="recipe-extra">
+              {extraFields.map(({ field: extra, label }) => (
+                <label key={extra}>
+                  {label}
+                  <NumberInput value={item[extra]} min={0} title={extra} onChange={(v) => patch(i, { [extra]: v })} />
+                </label>
+              ))}
+            </div>
+          )}
         </div>
-      ))}
+        );
+      })}
       <button
         type="button"
         className="btn tiny"
         disabled={resources.length === 0}
         title={resources.length === 0 ? 'Define resources in config/resources.json first' : undefined}
-        onClick={() => onChange([...list, { resource_id: resources[0].id, [amountField]: 1 }])}
+        onClick={() =>
+          onChange([...list, { resource_id: resources[0].id, [amountFields[0]]: 1, ...Object.fromEntries(extraFields.map(({ field }) => [field, 0])) }])
+        }
       >
         + {addLabel}
       </button>
     </fieldset>
+  );
+}
+
+/** Subjects the building hosts: null, or one subject type (config/subjects.json) with a positive capacity. */
+function ResidentsField({ building, ctx, onChange }) {
+  const subjects = objectItems(ctx.subjects);
+  const residents = isPlainObject(building.residents) ? building.residents : null;
+  const options = subjects.map((s) => ({ value: s.id, label: `${ctx.texts?.[s.name_key] ?? s.id} (${s.id})` }));
+  // Not a <Field>: that component is a <label>, which must wrap a single control.
+  return (
+    <div className="field wide">
+      <span className="field-label">Residents</span>
+      <div className="inline">
+        <Checkbox
+          checked={residents !== null}
+          label="Hosts residents"
+          onChange={(on) => onChange(on ? { type: subjects[0]?.id ?? '', capacity: 1 } : null)}
+        />
+        {residents && (
+          <>
+            <RefSelect value={residents.type} options={options} placeholder="— subject type —" onChange={(v) => onChange({ ...residents, type: v })} />
+            <NumberInput
+              value={residents.capacity}
+              min={0}
+              title="capacity"
+              className={residents.capacity > 0 ? '' : 'invalid'}
+              onChange={(v) => onChange({ ...residents, capacity: v })}
+            />
+          </>
+        )}
+      </div>
+      <small className="field-hint">
+        {residents
+          ? 'Subject type it hosts and how many (capacity > 0)'
+          : subjects.length
+            ? 'Hosts no subjects (residents: null)'
+            : 'Define subject types in config/subjects.json first'}
+      </small>
+    </div>
   );
 }
 
@@ -90,13 +183,14 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
   const resources = objectItems(ctx.resources);
   const set = (field, value) => onChange({ ...building, [field]: value }, `${index}.${field}`);
   const unitOf = (id) => ctx.texts?.[resources.find((r) => r.id === id)?.unit_type_key] ?? 'unit';
+  const legacyStored = Array.isArray(building.produces) && building.produces.some((p) => isPlainObject(p) && 'stored' in p);
   const codeTaken = data.some((b, i) => i !== index && b?.code === building.code);
 
   const renameId = (next) => {
     next = next.trim();
     if (!next || data.some((b, i) => i !== index && b?.id === next)) return false;
     const refs = levelReferences(ctx.docs, building.id);
-    onChange({ ...building, id: next });
+    onChange({ ...followIdRename(building, 'building', building.id, next, ctx), id: next });
     const total = refs.reduce((sum, [, n]) => sum + n, 0);
     if (total && confirm(`${total} level instance(s) reference "${building.id}" (${refs.map(([p]) => p).join(', ')}).\nUpdate them to "${next}"?`))
       for (const [path] of refs)
@@ -110,15 +204,26 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
   return (
     <div className="form">
       <ExtraFields value={building} schema={buildingTypeSchema} onChange={(v) => onChange(v)} />
+      {legacyStored && (
+        <div className="callout error">
+          <span>
+            Products still declare <code>stored</code>, which now belongs to level instances. Use “Sync stored” in the levels first to
+            carry the amounts over.
+          </span>
+          <button type="button" className="btn tiny" onClick={() => set('produces', building.produces.map(({ stored: _stored, ...product }) => product))}>
+            Remove stored from products
+          </button>
+        </div>
+      )}
       <div className="form-grid">
-        <Field label="ID" hint="Unique; referenced by level instances as building_id (applied on Enter/blur)">
+        <Field label="ID" hint="Unique; referenced by level instances as building_id (applied on Enter/blur); name/description keys follow it">
           <CommitInput value={building.id ?? ''} onCommit={renameId} spellCheck={false} />
         </Field>
         <Field label="Code" hint="Unique short code shown in the scene" error={codeTaken ? 'Code already used' : null}>
           <TextInput value={building.code} onChange={(v) => set('code', v)} spellCheck={false} />
         </Field>
         <Field label="Name key" wide>
-          <TextKeyInput value={building.name_key} onChange={(v) => set('name_key', v)} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} />
+          <TextKeyInput value={building.name_key} onChange={(v) => set('name_key', v)} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} onEditKey={ctx.onEditTextKey} onRenameKey={ctx.onRenameTextKey} />
         </Field>
         <Field label="Description key" wide>
           <TextKeyInput
@@ -126,6 +231,8 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
             onChange={(v) => set('description_key', v)}
             texts={ctx.texts}
             onCreateKey={ctx.onCreateTextKey}
+            onEditKey={ctx.onEditTextKey}
+            onRenameKey={ctx.onRenameTextKey}
           />
         </Field>
       </div>
@@ -133,10 +240,13 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
       <div className="form-split">
         <div className="form-grid">
           <Field label="Width" hint="World units (> 0)" error={!(building.width > 0) ? 'Must be positive' : null}>
-            <NumberInput value={building.width} min={0} step={0.1} onChange={(v) => set('width', v)} />
+            <NumberInput value={building.width} min={0} onChange={(v) => set('width', v)} />
           </Field>
           <Field label="Height" hint="World units (> 0)" error={!(building.height > 0) ? 'Must be positive' : null}>
-            <NumberInput value={building.height} min={0} step={0.1} onChange={(v) => set('height', v)} />
+            <NumberInput value={building.height} min={0} onChange={(v) => set('height', v)} />
+          </Field>
+          <Field label="Sprite path" wide hint="Optional repository-relative PNG path. Empty uses color. Files are checked by python tools/build.py." error={validSpritePath(building.sprite) ? null : SPRITE_PATH_ERROR}>
+            <PathInput value={building.sprite} onChange={(v) => set('sprite', v)} />
           </Field>
           <Field label="Color" wide>
             <ColorInput value={building.color} onChange={(v) => set('color', v)} />
@@ -147,17 +257,44 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
           <Field label="Power output" hint="kW (≥ 0)">
             <NumberInput value={building.power_output_kw} min={0} onChange={(v) => set('power_output_kw', v)} />
           </Field>
+          <Checkbox checked={building.always_on === true} onChange={(v) => set('always_on', v)} label="Always on (cannot be switched off)" />
+          <Field label="Warm-up time" hint="Hours from activation to production (≥ 0)" error={building.warmup_time < 0 ? 'Must be ≥ 0' : null}>
+            <NumberInput value={building.warmup_time} min={0} onChange={(v) => set('warmup_time', v)} />
+          </Field>
+          <Field label="Cooldown time" hint="Hours to return to the initial state (≥ 0)" error={building.cooldown_time < 0 ? 'Must be ≥ 0' : null}>
+            <NumberInput value={building.cooldown_time} min={0} onChange={(v) => set('cooldown_time', v)} />
+          </Field>
+          <Field
+            label="Min operative health"
+            hint="Health needed to activate, in [0,1]"
+            error={!(building.min_operative_health >= 0 && building.min_operative_health <= 1) ? 'Must be in [0,1]' : null}
+          >
+            <NumberInput value={building.min_operative_health} min={0} max={1} onChange={(v) => set('min_operative_health', v)} />
+          </Field>
+          <Field label="Materials amount" hint="To build and repair (≥ 0)" error={building.materials_amount < 0 ? 'Must be ≥ 0' : null}>
+            <NumberInput value={building.materials_amount} min={0} onChange={(v) => set('materials_amount', v)} />
+          </Field>
+          <ResidentsField building={building} ctx={ctx} onChange={(v) => set('residents', v)} />
         </div>
         <SizePreview building={building} />
       </div>
 
+      <BuildingSubjectRoles key={index} value={building.subject_roles} ctx={ctx} onChange={(value, field) => onChange({ ...building, subject_roles: value }, `${index}.subject_roles${field ? `.${field}` : ''}`)} />
       <div className="form-split">
         <RecipeList
           title="Needs"
           addLabel="Add need"
           items={building.needs}
-          amountField="amount_per_unit"
-          amountHint={(it) => `${unitOf(it.resource_id)} per produced unit`}
+          // amount_per_resident is offered only with residents (or while a need still uses it).
+          amountFields={
+            isPlainObject(building.residents) || (Array.isArray(building.needs) && building.needs.some((n) => n?.amount_per_resident !== undefined))
+              ? NEED_AMOUNT_FIELDS
+              : NEED_AMOUNT_FIELDS.filter((f) => f !== 'amount_per_resident')
+          }
+          amountHint={(it, field) =>
+            `${unitOf(it.resource_id)} ${{ amount_per_unit: 'per produced unit', amount_per_hour: 'per hour', amount_per_resident: 'per resident per hour' }[field]}`
+          }
+          extraFields={[{ field: 'capacity', label: 'Capacity' }]}
           resources={resources}
           onChange={(v) => set('needs', v)}
         />
@@ -165,10 +302,31 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
           title="Produces"
           addLabel="Add product"
           items={building.produces}
-          amountField="time_per_unit"
-          amountHint={(it) => `hours per ${unitOf(it.resource_id)}` + (it.time_per_unit > 0 ? ` (${+(1 / it.time_per_unit).toFixed(3)}/h)` : '')}
+          // amount_per_resident is offered only with residents (or while a product still uses it).
+          amountFields={
+            isPlainObject(building.residents) || (Array.isArray(building.produces) && building.produces.some((p) => p?.amount_per_resident !== undefined))
+              ? PRODUCT_RATE_FIELDS
+              : ['units_per_hour']
+          }
+          amountHint={(it, field) =>
+            field === 'amount_per_resident'
+              ? `${unitOf(it.resource_id)} per resident per hour`
+              : `${unitOf(it.resource_id)} per hour`
+          }
+          extraFields={[
+            { field: 'capacity', label: 'Capacity' },
+          ]}
           resources={resources}
           onChange={(v) => set('produces', v)}
+        />
+        <RecipeList
+          title="Storage"
+          addLabel="Add storage"
+          items={building.storage}
+          amountFields={['capacity']}
+          amountHint={(it) => `${unitOf(it.resource_id)} capacity`}
+          resources={resources}
+          onChange={(v) => set('storage', v)}
         />
       </div>
     </div>
@@ -176,7 +334,7 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
 }
 
 export default function BuildingsEditor({ data, onChange, ctx }) {
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelected] = useCatalogSelection(ctx.gridSelection);
   if (!Array.isArray(data)) return <p className="empty">Expected an array of building types. Fix the file in the JSON tab.</p>;
   const current = selected !== null && selected < data.length ? selected : null;
   const building = current !== null ? data[current] : null;
@@ -212,7 +370,7 @@ export default function BuildingsEditor({ data, onChange, ctx }) {
     <div className="master-detail">
       <aside className="panel list-panel">
         <div className="list-header">
-          <h3>Building types ({data.length})</h3>
+          <h3><button type="button" className="catalog-grid-title" onClick={ctx.onOpenGrid} title="Open editable grid">Building types ({data.length})</button></h3>
           <button type="button" className="btn tiny" onClick={add}>
             + New
           </button>

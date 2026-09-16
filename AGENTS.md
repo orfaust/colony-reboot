@@ -113,6 +113,23 @@ Application adapters + UI -> Render descriptions -> Render backend
 - Keep build instructions and architecture documentation synchronized with implementation changes.
 - If save files are introduced, use a versioned format and validate loaded data; do not serialize raw pointers or GPU handles.
 
+## Manage List Editor Convention
+
+- For every new or substantially changed list-of-elements editor in `manage`, use
+  the existing master-detail interaction: selectable list on the left and only the
+  selected element's properties on the right. Reuse `master-detail`, `list-panel`,
+  `item-list`, and `detail-panel` styling and its responsive stacking behavior.
+- Keep creation and ordering controls with the list, and selected-element actions
+  with the detail panel. Preserve selection when reordering either the selected
+  element or a neighbor; select newly created elements and handle empty/deleted
+  selections explicitly. Respect domain restrictions (for example, required role
+  IDs cannot be duplicated to create arbitrary new roles).
+- Preserve validation, localization references, unknown fields, undo/history keys,
+  and malformed-data repair paths. Do not silently normalize loaded data.
+- Apply this convention going forward, including nested element editors when they
+  are introduced or redesigned. Do not rewrite unrelated existing editors merely
+  to enforce it; any migration must stay within the requested task's scope.
+
 ## Agent Workflow and Definition of Done
 
 - Inspect existing code and applicable instructions before changing files. Preserve unrelated user changes.

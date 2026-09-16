@@ -13,7 +13,7 @@ localized_power_values :: proc(t: ^testing.T) {
     source :: #load("../../assets/localization/en.json")
     text, ok := localization.decode(transmute([]byte)source, context.temp_allocator)
     testing.expect(t, ok)
-    testing.expect(t, power_text(text.power_output_format,16) == "+16.00 kW")
-    testing.expect(t, power_text(text.power_need_format,7) == "-7.00 kW")
-    testing.expect(t, power_text(text.power_available_format,9) == "9.00 kW free")
+    testing.expect(t, power_text(text.power_output_format,16) == "+16 kW")
+    testing.expect(t, power_text(text.power_need_format,7) == "-7 kW")
+    testing.expect(t, power_text(text.power_available_format,9) == "9 kW free")
 }

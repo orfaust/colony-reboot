@@ -3,6 +3,10 @@
 *.pdb
 *.obj
 
+# Python build/test caches
+__pycache__/
+*.pyc
+
 # Local tooling and generated output
 /graphify-out/
 /.claude/

@@ -19,6 +19,8 @@ array_ids_drive_power_and_reset :: proc(t: ^testing.T) {
         {id="CU1",building_id="control_unit",health=1},
         {id="P1",building_id="test_producer",health=1},
     }
+    // Warmup rules are covered in logic; start instantly so the producer powers itself.
+    for &definition in catalog.buildings { definition.warmup_time = 0 }
     state := logic.new_session(initial[:],catalog.buildings,allocator)
     testing.expect(t,state.active[0] && !state.active[1])
     testing.expect(t,logic.toggle(&state,{id="P1"}) == .Applied)

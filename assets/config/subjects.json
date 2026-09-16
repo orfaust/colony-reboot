@@ -1,0 +1,54 @@
+[
+  {
+    "id": "human",
+    "width": 1,
+    "height": 1,
+    "sprite": "",
+    "name_key": "subject_human_name",
+    "color": { "r": 219, "g": 72, "b": 150 },
+    "rest_time": 12,
+    "work_time": 12,
+    "roles": [
+      { "role_id": "worker", "sprite": "" },
+      { "role_id": "supervisor", "sprite": "" }
+    ],
+    "needs": [
+      {
+        "resource_id": "water",
+        "amount_per_hour": 0.08,
+        "shortage_alert_time": 6,
+        "shortage_max_time": 72
+      },
+      {
+        "resource_id": "meals",
+        "amount_per_hour": 0.125,
+        "shortage_alert_time": 24,
+        "shortage_max_time": 400
+      }
+    ],
+    "produces": [{ "resource_id": "compost", "units_per_hour": 0.01 }]
+  },
+  {
+    "id": "robot",
+    "width": 1,
+    "height": 1,
+    "sprite": "",
+    "name_key": "subject_robot_name",
+    "color": { "r": 33, "g": 159, "b": 176 },
+    "rest_time": 4,
+    "work_time": 20,
+    "roles": [
+      { "role_id": "worker", "sprite": "" },
+      { "role_id": "repairer", "sprite": "" }
+    ],
+    "needs": [
+      {
+        "resource_id": "batteries",
+        "amount_per_hour": 0.05,
+        "shortage_alert_time": 8,
+        "shortage_max_time": 72
+      }
+    ],
+    "produces": []
+  }
+]

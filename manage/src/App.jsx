@@ -1,18 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from './api.js';
-import { BUILDINGS_PATH, detectKind, RESOURCES_PATH, TEXTS_PATH, validateDoc } from './lib/schema.js';
+import { BUILDINGS_PATH, detectKind, RESOURCES_PATH, SUBJECTS_PATH, SUBJECT_ROLES_PATH, SHIPS_PATH, STATIONS_PATH, TEXTS_PATH, validateDoc } from './lib/schema.js';
+import { syncStationInstance } from './lib/station.js';
+import { editTranslation } from './lib/translation.js';
+import { planTranslationRename, applyRenameTransaction, stepRenameTransaction } from './lib/translationRename.js';
 import { detectStyle, formatJson } from './lib/format.js';
 import BuildingsEditor from './components/BuildingsEditor.jsx';
 import ResourcesEditor from './components/ResourcesEditor.jsx';
+import SubjectsEditor from './components/SubjectsEditor.jsx';
+import SubjectRolesEditor from './components/SubjectRolesEditor.jsx';
+import { ShipsEditor, SpaceStationsEditor } from './components/StationEditors.jsx';
+import KeyBindingsEditor from './components/KeyBindingsEditor.jsx';
 import LevelEditor from './components/LevelEditor.jsx';
 import LocalizationEditor from './components/LocalizationEditor.jsx';
 import GenericEditor from './components/GenericEditor.jsx';
+import CatalogGrid from './components/CatalogGrid.jsx';
+import { GRID_SCHEMAS } from './lib/catalogGrid.js';
 import RawEditor from './components/RawEditor.jsx';
 import IssuesPanel from './components/IssuesPanel.jsx';
+import FilesMenu from './components/FilesMenu.jsx';
 
 const HISTORY_LIMIT = 200;
 const COALESCE_MS = 1200;
-const EDITORS = { buildings: BuildingsEditor, resources: ResourcesEditor, level: LevelEditor, localization: LocalizationEditor };
+const EDITORS = {
+  buildings: BuildingsEditor,
+  resources: ResourcesEditor,
+  subjects: SubjectsEditor,
+  subject_roles: SubjectRolesEditor,
+  key_bindings: KeyBindingsEditor,
+  ships: ShipsEditor,
+  space_stations: SpaceStationsEditor,
+  level: LevelEditor,
+  localization: LocalizationEditor,
+};
 
 // A doc is { data, style, saved (formatted text last on disk), mtime, past, future, lastKey, lastTime, loadError }.
 function makeDoc(text, mtime) {
@@ -28,7 +48,6 @@ function makeDoc(text, mtime) {
 const isDirty = (doc) => doc && doc.data !== undefined && formatJson(doc.data, doc.style) !== doc.saved;
 
 export default function App() {
-  const [root, setRoot] = useState('');
   const [files, setFiles] = useState([]);
   const [docs, setDocs] = useState({});
   const [active, setActive] = useState(null);
@@ -45,8 +64,7 @@ export default function App() {
   }, [status]);
 
   const loadAll = useCallback(async (keepActive) => {
-    const { root, files } = await api.listFiles();
-    setRoot(root);
+    const { files } = await api.listFiles();
     setFiles(files);
     const loaded = await Promise.all(files.map(async (f) => [f.path, await api.readFile(f.path)]));
     setDocs(Object.fromEntries(loaded.map(([path, { text, mtime }]) => [path, makeDoc(text, mtime)])));
@@ -81,6 +99,9 @@ export default function App() {
   }, []);
 
   const undo = useCallback((path) => {
+    const transaction = stepRenameTransaction(docsRef.current, path, 'undo');
+    if (transaction?.error) { flash(transaction.error, 'error'); return; }
+    if (transaction) { setDocs(transaction.docs); return; }
     setDocs((all) => {
       const doc = all[path];
       if (!doc?.past.length) return all;
@@ -92,6 +113,9 @@ export default function App() {
   }, []);
 
   const redo = useCallback((path) => {
+    const transaction = stepRenameTransaction(docsRef.current, path, 'redo');
+    if (transaction?.error) { flash(transaction.error, 'error'); return; }
+    if (transaction) { setDocs(transaction.docs); return; }
     setDocs((all) => {
       const doc = all[path];
       if (!doc?.future.length) return all;
@@ -137,6 +161,9 @@ export default function App() {
   };
 
   const createLevel = async () => {
+    const stations = docs[STATIONS_PATH]?.data;
+    const station = Array.isArray(stations) ? stations.find((s) => s && typeof s.id === 'string' && s.id) : null;
+    if (!station) { flash('Create a space station template before creating a level.', 'error'); return; }
     const taken = new Set(files.map((f) => f.path));
     let n = 0;
     while (taken.has(`levels/level_${n}.json`)) n++;
@@ -144,7 +171,7 @@ export default function App() {
     if (!name) return;
     const path = `levels/${name.endsWith('.json') ? name : `${name}.json`}`;
     try {
-      await api.createFile(path, formatJson({ version: 1, level: n, buildings: [] }));
+      await api.createFile(path, formatJson({ version: 1, level: n, buildings: [], subjects: [], space_station: syncStationInstance(null, station) }));
       await loadAll(true);
       setActive(path);
       flash(`Created ${path}`);
@@ -152,6 +179,26 @@ export default function App() {
       flash(`Cannot create ${path}: ${e.message}`, 'error');
     }
   };
+
+  const renameTextKey = (key) => {
+    const before = docsRef.current;
+    const nextKey = prompt(`Rename translation key "${key}". All schema-defined references will be updated:`, key);
+    if (nextKey === null || nextKey === key) return;
+    const plan = planTranslationRename(before, active, key, nextKey);
+    if (plan.error) { flash(plan.error, 'error'); return; }
+    const files = Object.keys(plan.changes);
+    if (!confirm(`Rename "${key}" to "${nextKey}"?\nUpdate all ${plan.count} reference(s) in ${files.length - 1} file(s), preserving the translated text.\nAffected files: ${files.join(', ')}\nUse Save all to persist every affected file.`)) return;
+    setDocs(applyRenameTransaction(before, plan.changes));
+    flash(`Renamed "${key}". Use Save all for all ${files.length} affected files. Undo/redo is coordinated across them.`);
+  };
+
+  const editTextKey = useCallback((key) => {
+    const texts = docsRef.current[TEXTS_PATH]?.data;
+    const next = editTranslation(texts, key, (message, value) => prompt(message, value));
+    if (!next) return;
+    updateDoc(TEXTS_PATH, next);
+    flash(`Updated "${key}" in ${TEXTS_PATH} (unsaved). Save that file or use Save all; undo is in en.json.`);
+  }, [updateDoc]);
 
   // Adds a missing localization key to en.json (kept unsaved so it can be reviewed).
   const createTextKey = useCallback(
@@ -195,10 +242,15 @@ export default function App() {
       texts: docs[TEXTS_PATH]?.data,
       buildings: docs[BUILDINGS_PATH]?.data,
       resources: docs[RESOURCES_PATH]?.data,
+      subjects: docs[SUBJECTS_PATH]?.data,
+      subject_roles: docs[SUBJECT_ROLES_PATH]?.data,
+      ships: docs[SHIPS_PATH]?.data,
+      space_stations: docs[STATIONS_PATH]?.data,
       onCreateTextKey: createTextKey,
+      onEditTextKey: editTextKey,
       updateDoc,
     }),
-    [docs, createTextKey, updateDoc],
+    [docs, createTextKey, editTextKey, updateDoc],
   );
   const onChange = (data, historyKey) => updateDoc(active, data, historyKey);
 
@@ -219,7 +271,9 @@ export default function App() {
   else if (doc && tab === 'json') editor = <RawEditor data={doc.data} onChange={onChange} />;
   else if (doc) {
     const Editor = EDITORS[kind] ?? GenericEditor;
-    editor = <Editor key={active} data={doc.data} onChange={onChange} ctx={ctx} />;
+    editor = GRID_SCHEMAS[kind]
+      ? <CatalogGrid key={active} Editor={Editor} kind={kind} path={active} data={doc.data} onChange={onChange} ctx={{ ...ctx, onRenameTextKey: renameTextKey }} />
+      : <Editor key={active} data={doc.data} onChange={onChange} ctx={{ ...ctx, onRenameTextKey: renameTextKey }} />;
   }
 
   return (
@@ -232,9 +286,7 @@ export default function App() {
             <span className="subtitle">Asset Manager</span>
           </div>
         </div>
-        <code className="root" title="Assets directory">
-          {root}
-        </code>
+        <FilesMenu groups={groups} active={active} allIssues={allIssues} dirtyPaths={dirtyPaths} onSelect={setActive} onCreateLevel={createLevel} />
         <div className="btn-row">
           <button type="button" className="btn" onClick={() => loadAll(true)} disabled={dirtyPaths.length > 0} title="Reload every file from disk">
             ⟳ Rescan
@@ -244,36 +296,6 @@ export default function App() {
           </button>
         </div>
       </header>
-
-      <nav className="sidebar">
-        {Object.entries(groups).map(([dir, list]) => (
-          <div key={dir} className="file-group">
-            <div className="group-title">
-              {dir}
-              {dir === 'levels' && (
-                <button type="button" className="btn tiny ghost" onClick={createLevel} title="New level">
-                  +
-                </button>
-              )}
-            </div>
-            {list.map((f) => {
-              const errors = (allIssues[f.path] ?? []).filter((i) => i.level === 'error').length;
-              return (
-                <button key={f.path} type="button" className={`file${f.path === active ? ' active' : ''}`} onClick={() => setActive(f.path)}>
-                  <span className="file-name">{f.path.split('/').pop()}</span>
-                  {errors > 0 && <span className="badge error">{errors}</span>}
-                  {isDirty(docs[f.path]) && <span className="dirty" title="Unsaved changes" />}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-        {!groups.levels && files.length > 0 && (
-          <button type="button" className="btn tiny" onClick={createLevel}>
-            + New level
-          </button>
-        )}
-      </nav>
 
       <main className="main">
         {doc ? (

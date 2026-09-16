@@ -1,146 +1,324 @@
 {
   "version": 1,
   "level": 0,
+  "space_station": {
+    "station_id": "space_station_1",
+    "distance": 5000,
+    "resources": [],
+    "subjects": [
+      {
+        "subject_id": "human",
+        "units": 12,
+        "units_per_hour": 0.1
+      },
+      {
+        "subject_id": "robot",
+        "units": 3,
+        "units_per_hour": 0.05
+      }
+    ]
+  },
   "buildings": [
     {
       "id": "CU1",
       "building_id": "control_unit",
       "position": {
-        "x": 3,
-        "y": -1
+        "x": -0.5,
+        "y": -0.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": true,
+      "stored": [],
+      "residents_amount": null
     },
     {
       "id": "SP1",
       "building_id": "solar_panel",
       "position": {
-        "x": 6,
-        "y": -4
+        "x": 0,
+        "y": -3
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": true,
+      "stored": [],
+      "residents_amount": null
     },
     {
       "id": "SP2",
       "building_id": "solar_panel",
       "position": {
-        "x": 8,
-        "y": -4
+        "x": 1.5,
+        "y": -3
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": true,
+      "stored": [],
+      "residents_amount": null
     },
     {
       "id": "RW1",
       "building_id": "robots_warehouse",
       "position": {
-        "x": 3,
-        "y": 3
+        "x": 2.5,
+        "y": 1.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "batteries",
+          "amount": 0
+        },
+        {
+          "resource_id": "materials",
+          "amount": 0
+        }
+      ],
+      "residents_amount": 0
     },
     {
       "id": "WC1",
       "building_id": "water_collector",
       "position": {
-        "x": -6,
-        "y": -3
+        "x": -4.5,
+        "y": 1.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "water",
+          "amount": 0
+        }
+      ],
+      "residents_amount": null
     },
     {
       "id": "GH1",
       "building_id": "greenhouse",
       "position": {
-        "x": -6,
-        "y": 3
+        "x": -3,
+        "y": -0.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "vegetables",
+          "amount": 0
+        },
+        {
+          "resource_id": "water",
+          "amount": 0
+        },
+        {
+          "resource_id": "compost",
+          "amount": 0
+        }
+      ],
+      "residents_amount": null
     },
     {
       "id": "SP3",
       "building_id": "solar_panel",
       "position": {
-        "x": 6,
-        "y": -2
+        "x": 3,
+        "y": -3
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": true,
+      "stored": [],
+      "residents_amount": null
     },
     {
       "id": "SP4",
       "building_id": "solar_panel",
       "position": {
-        "x": 8,
-        "y": -2
+        "x": 4.5,
+        "y": -3
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": true,
+      "stored": [],
+      "residents_amount": null
     },
     {
       "id": "GH2",
       "building_id": "greenhouse",
       "position": {
-        "x": -6,
-        "y": 1
+        "x": -4.5,
+        "y": -0.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "vegetables",
+          "amount": 0
+        },
+        {
+          "resource_id": "water",
+          "amount": 0
+        },
+        {
+          "resource_id": "compost",
+          "amount": 0
+        }
+      ],
+      "residents_amount": null
     },
     {
       "id": "MF1",
       "building_id": "meals_factory",
       "position": {
-        "x": -2,
-        "y": -4
+        "x": -3,
+        "y": -2.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "meals",
+          "amount": 0
+        },
+        {
+          "resource_id": "vegetables",
+          "amount": 0
+        },
+        {
+          "resource_id": "water",
+          "amount": 0
+        },
+        {
+          "resource_id": "proteins",
+          "amount": 0
+        }
+      ],
+      "residents_amount": null
     },
     {
       "id": "MF2",
       "building_id": "meals_factory",
       "position": {
-        "x": 0,
-        "y": -4
+        "x": -4.5,
+        "y": -2.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "meals",
+          "amount": 0
+        },
+        {
+          "resource_id": "vegetables",
+          "amount": 0
+        },
+        {
+          "resource_id": "water",
+          "amount": 0
+        },
+        {
+          "resource_id": "proteins",
+          "amount": 0
+        }
+      ],
+      "residents_amount": null
     },
     {
       "id": "MU1",
       "building_id": "mining_unit",
       "position": {
-        "x": 8.5,
-        "y": 4
+        "x": 4,
+        "y": -1
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "ores",
+          "amount": 0
+        },
+        {
+          "resource_id": "water",
+          "amount": 0
+        }
+      ],
+      "residents_amount": null
     },
     {
       "id": "OR1",
       "building_id": "ore_refinery",
       "position": {
-        "x": 6.5,
-        "y": 1.5
+        "x": 2,
+        "y": -1
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "materials",
+          "amount": 0
+        },
+        {
+          "resource_id": "ores",
+          "amount": 0
+        }
+      ],
+      "residents_amount": null
     },
     {
       "id": "HR1",
       "building_id": "humans_residence",
       "position": {
-        "x": -2,
-        "y": 1
+        "x": -1.5,
+        "y": 1.5
       },
       "health": 1,
-      "repairing": false
+      "repairing": false,
+      "enable_at_start": false,
+      "stored": [
+        {
+          "resource_id": "water",
+          "amount": 0
+        },
+        {
+          "resource_id": "meals",
+          "amount": 0
+        },
+        {
+          "resource_id": "compost",
+          "amount": 0
+        }
+      ],
+      "residents_amount": 0
+    },
+    {
+      "id": "Landing1",
+      "building_id": "landing_platform",
+      "position": {
+        "x": 0.5,
+        "y": 1.5
+      },
+      "health": 1,
+      "repairing": false,
+      "enable_at_start": true,
+      "stored": [],
+      "residents_amount": null
     }
-  ]
+  ],
+  "subjects": []
 }

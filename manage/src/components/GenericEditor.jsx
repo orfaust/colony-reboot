@@ -138,7 +138,7 @@ function JsonNode({ name, value, onChange, onRemove, onRename, ctx, depth }) {
   if (type === 'boolean') input = <Checkbox checked={value} onChange={onChange} label={String(value)} />;
   else if (type === 'number') input = <NumberInput value={value} onChange={onChange} />;
   else if (type === 'string' && name.endsWith('_key') && ctx.texts)
-    input = <TextKeyInput value={value} onChange={onChange} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} />;
+    input = <TextKeyInput value={value} onChange={onChange} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} onEditKey={ctx.onEditTextKey} onRenameKey={ctx.onRenameTextKey} />;
   else if (type === 'string') input = <TextInput value={value} onChange={onChange} />;
   else
     input = (

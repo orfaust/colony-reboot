@@ -17,7 +17,7 @@
     "id": "meals",
     "name_key": "resource_meals_name",
     "description_key": "resource_meals_description",
-    "unit_type_key": "unit_kg",
+    "unit_type_key": "portion",
     "color": { "r": 140, "g": 24, "b": 64 }
   },
   {
@@ -25,7 +25,7 @@
     "name_key": "resource_ores_name",
     "description_key": "resource_ores_description",
     "unit_type_key": "unit_kg",
-    "color": { "r": 48, "g": 48, "b": 48 }
+    "color": { "r": 45, "g": 32, "b": 64 }
   },
   {
     "id": "materials",
@@ -33,5 +33,26 @@
     "description_key": "resource_materials_description",
     "unit_type_key": "unit_kg",
     "color": { "r": 200, "g": 200, "b": 200 }
+  },
+  {
+    "id": "proteins",
+    "name_key": "resource_proteins_name",
+    "description_key": "resource_proteins_description",
+    "unit_type_key": "unit_kg",
+    "color": { "r": 163, "g": 65, "b": 0 }
+  },
+  {
+    "id": "compost",
+    "name_key": "resource_compost_name",
+    "description_key": "resource_compost_description",
+    "unit_type_key": "unit_kg",
+    "color": { "r": 36, "g": 21, "b": 5 }
+  },
+  {
+    "id": "batteries",
+    "name_key": "resource_batteries_name",
+    "description_key": "resource_batteries_description",
+    "unit_type_key": "unit",
+    "color": { "r": 200, "g": 214, "b": 0 }
   }
 ]

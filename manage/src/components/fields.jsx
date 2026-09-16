@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { hexToRgb, rgbToHex } from '../lib/object.js';
+import { parseNumberText, stepNumber } from '../lib/number.js';
+import { hoursPerUnitText } from '../lib/rate.js';
 
 export function Field({ label, hint, error, children, wide }) {
   return (
@@ -11,35 +13,58 @@ export function Field({ label, hint, error, children, wide }) {
   );
 }
 
-/** Keeps the typed text locally so partial input like "0." or "-" is not lost. */
-export function NumberInput({ value, onChange, integer, min, max, step = 'any', className = '', ...rest }) {
+/**
+ * Keeps the typed text locally so partial input like "0." or "-" is not lost.
+ * A text field, not type="number": the browser locale must not display or accept a
+ * comma decimal separator. Text with a comma is flagged and never reported.
+ */
+export function NumberInput({ value, onChange, integer, min, max, step = 0.1, className = '', title, ...rest }) {
   const format = (v) => (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
   const [text, setText] = useState(format(value));
   const focused = useRef(false);
   useEffect(() => {
     if (!focused.current) setText(format(value));
   }, [value]);
+  const { error } = parseNumberText(text, integer);
   return (
     <input
       {...rest}
-      type="number"
-      className={`input num ${className}`}
+      type="text"
+      inputMode={integer ? 'numeric' : 'decimal'}
+      autoComplete="off"
+      spellCheck={false}
+      className={`input num${error ? ' invalid' : ''} ${className}`}
+      title={error ?? title}
+      aria-invalid={error ? true : undefined}
       value={text}
-      min={min}
-      max={max}
-      step={integer ? 1 : step}
       onFocus={() => (focused.current = true)}
       onBlur={() => {
         focused.current = false;
         setText(format(value));
       }}
+      onKeyDown={(e) => {
+        rest.onKeyDown?.(e);
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        const next = stepNumber(value, e.key === 'ArrowUp' ? 1 : -1, integer ? 1 : step, min, max);
+        setText(format(next));
+        onChange(next);
+      }}
       onChange={(e) => {
         setText(e.target.value);
-        const n = Number(e.target.value);
-        if (e.target.value.trim() !== '' && Number.isFinite(n)) onChange(integer ? Math.round(n) : n);
+        const parsed = parseNumberText(e.target.value, integer);
+        if ('value' in parsed) onChange(integer ? Math.round(parsed.value) : parsed.value);
       }}
     />
   );
+}
+
+/** Reciprocal is a read-only preview of the accepted hourly rate. */
+export function UnitsPerHourInput(props) {
+  return <div className="hourly-rate-input">
+    <NumberInput {...props} />
+    <small className="field-hint">Hours per unit: <output>{hoursPerUnitText(props.value)}</output></small>
+  </div>;
 }
 
 export function TextInput({ value, onChange, className = '', ...rest }) {
@@ -117,14 +142,16 @@ export function RefSelect({ value, options, onChange, placeholder = '— select 
   );
 }
 
-/** Localization key picker with a live preview of the English text. */
-export function TextKeyInput({ value, onChange, texts, onCreateKey }) {
+/** Stable localization key picker; editing its preview changes only en.json. */
+export function TextKeyInput({ value, onChange, texts, onCreateKey, onEditKey, onRenameKey, 'aria-label': ariaLabel }) {
   const listId = useId();
   const text = texts?.[value];
   const missing = typeof text !== 'string' || text.trim() === '';
   return (
     <div className="text-key">
-      <TextInput value={value} onChange={onChange} list={listId} className={missing ? 'invalid' : ''} spellCheck={false} />
+      <TextInput value={value} onChange={onChange} aria-label={ariaLabel} list={listId} className={missing ? 'invalid' : ''} spellCheck={false} />
+      {onRenameKey && typeof value === 'string' && value && <button type="button" className="btn tiny"
+        aria-label={`Rename translation key ${value}`} onClick={() => onRenameKey(value)}>Rename key…</button>}
       <datalist id={listId}>
         {Object.keys(texts ?? {}).map((k) => (
           <option key={k} value={k}>
@@ -132,7 +159,11 @@ export function TextKeyInput({ value, onChange, texts, onCreateKey }) {
           </option>
         ))}
       </datalist>
-      {missing ? (
+      {onEditKey && typeof text === 'string' ? (
+        <button type="button" className={`text-preview translation-edit${missing ? ' missing' : ''}`}
+          aria-label={`Edit English translation for ${value}`} title="Edit translation in en.json (shared by all references)"
+          onClick={() => onEditKey(value)}>{missing ? 'Empty text — edit translation' : `“${text}”`}</button>
+      ) : missing ? (
         <div className="text-preview missing">
           <span>Missing in en.json</span>
           {onCreateKey && value && (

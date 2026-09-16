@@ -10,28 +10,64 @@ scene_click_consumption :: proc(t: ^testing.T) {
     }
     state: Scene_State
     notice := notice_view(&state,640,360)
+    hud := hud_view(640,360)
     input := c.Input{focused=true,click=true,mouse_x=130,mouse_y=130}
-    command, ok := scene_command(input, targets[:], notice)
+    command, ok := scene_command(input, targets[:], notice, hud)
     testing.expect(t, ok && command.id == "upper")
     input.focused = false
-    _, ok = scene_command(input, targets[:], notice)
+    _, ok = scene_command(input, targets[:], notice, hud)
     testing.expect(t, !ok)
     input.focused = true
     input.back = true
-    _, ok = scene_command(input, targets[:], notice)
+    _, ok = scene_command(input, targets[:], notice, hud)
     testing.expect(t, !ok)
     input.back = false
     input.mouse_x, input.mouse_y = notice.bounds.x+1, notice.bounds.y+1
     targets[1].bounds = notice.bounds
-    _, ok = scene_command(input, targets[:], notice)
+    _, ok = scene_command(input, targets[:], notice, hud)
     testing.expect(t, !ok)
     input.mouse_x, input.mouse_y = 600, 300
-    _, ok = scene_command(input, targets[:], notice)
+    _, ok = scene_command(input, targets[:], notice, hud)
     testing.expect(t, !ok)
     input.click = false
     input.mouse_x, input.mouse_y = 110,110
-    _, ok = scene_command(input, targets[:], notice)
+    _, ok = scene_command(input, targets[:], notice, hud)
     testing.expect(t, !ok)
+    // The clock panel consumes clicks on buildings drawn beneath it.
+    input.click = true
+    input.mouse_x, input.mouse_y = hud.bounds.x+1, hud.bounds.y+1
+    targets[1].bounds = hud.bounds
+    _, ok = scene_command(input, targets[:], notice, hud)
+    testing.expect(t, !ok)
+}
+
+@(test)
+hud_stays_top_left_on_resize :: proc(t: ^testing.T) {
+    sizes := [?][2]f32{{640,360},{1280,720},{1920,1080}}
+    for size in sizes {
+        hud := hud_view(size[0],size[1])
+        testing.expect(t, hud.bounds == c.Rect{16,16,HUD_WIDTH,HUD_HEIGHT})
+    }
+    tiny := hud_view(20,10)
+    testing.expect(t, tiny.bounds.width >= 0 && tiny.bounds.height >= 0)
+}
+
+@(test)
+speed_commands :: proc(t: ^testing.T) {
+    input := c.Input{focused=true,speed_up=true}
+    change, ok := speed_command(input)
+    testing.expect(t, ok && change == .Faster)
+    input = {focused=true,slow_down=true}
+    change, ok = speed_command(input)
+    testing.expect(t, ok && change == .Slower)
+    rejected := [?]c.Input{
+        {focused=true}, {focused=true,speed_up=true,slow_down=true},
+        {speed_up=true}, {focused=true,back=true,slow_down=true},
+    }
+    for input in rejected {
+        _, ok = speed_command(input)
+        testing.expect(t, !ok)
+    }
 }
 
 @(test)
