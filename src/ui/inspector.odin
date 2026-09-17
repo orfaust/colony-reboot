@@ -5,6 +5,7 @@ import c "../contracts"
 // A right-button gesture becomes an inspection only on release, within 4 pixels.
 // Focus loss, Escape and starting over an overlay cancel the gesture.
 update_inspector :: proc(state: ^Scene_State, input: c.Input, targets: []c.Building_Target, notice: c.Notice_View, hud: c.Hud_View) {
+    if state.modal != .None { state.right_pending = false; return }
     if !input.focused || input.back {
         state.right_pending = false
         if input.back { state.inspected_id = "" }

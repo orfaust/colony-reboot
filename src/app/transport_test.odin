@@ -14,7 +14,7 @@ transport_manifest_presentation :: proc(t: ^testing.T) {
     mem.dynamic_arena_init(&arena,alignment=64)
     defer mem.dynamic_arena_destroy(&arena)
     allocator := mem.dynamic_arena_allocator(&arena)
-    text, ok := localization.decode(transmute([]byte)#load("../../assets/localization/en.json"),allocator)
+    text, ok := localization.decode(transmute([]byte)#load("../../assets/config/default/localization/en.json"),allocator)
     testing.expect(t,ok)
     ships := [?]logic.Ship{{id="S",name="Shuttle",color={1,2,3}}}
     subjects := [?]logic.Subject_Type{{id="human",name_key="play",color={4,5,6}}}
@@ -74,13 +74,26 @@ transport_manifest_presentation :: proc(t: ^testing.T) {
     cards = transport_cards(&fleet,catalog,text.entries,{16,64,300,176},0)
     testing.expect(t,strings.contains(cards[0].lines[4],text.entries["transport_eta_unknown"]))
     testing.expect(t,!strings.has_suffix(cards[0].lines[4]," h"))
+    // An ordinary request carries a stable approval id and no misleading ETA.
+    fleet.missions[0].phase = .Awaiting_Approval
+    fleet.missions[0].id = 42
+    fleet.missions[0].loaded = 0
+    cards = transport_cards(&fleet,catalog,text.entries,{16,64,300,176},0)
+    testing.expect(t,cards[0].approve_id == 42)
+    testing.expect(t,cards[0].lines[4] == text.entries["transport_awaiting_approval"])
+    testing.expect(t,!strings.contains(cards[0].lines[4],"ETA"))
+    fleet.missions[0].id = 0
+    fleet.missions[0].phase = .Waiting_Landing
+    fleet.missions[0].loaded = 100
     // Finished history cannot occupy a visible slot; stale scroll clamps after removal.
     fleet.count = 4
     fleet.missions[1] = fleet.missions[0]
     fleet.missions[1].phase = .Completed
     fleet.missions[2] = fleet.missions[0]
+    fleet.missions[2].ship_id = "S2"
     fleet.missions[2].phase = .Returning
     fleet.missions[3] = fleet.missions[0]
+    fleet.missions[3].ship_id = "S3"
     fleet.missions[3].phase = .Cancelled
     all_cards := transport_cards(&fleet,catalog,text.entries,{16,64,300,176},0,true)
     testing.expect(t,len(all_cards) == 2)
@@ -91,4 +104,34 @@ transport_manifest_presentation :: proc(t: ^testing.T) {
     cards = transport_cards(&fleet,catalog,text.entries,{16,64,300,176},100)
     testing.expect(t,len(cards) == 1 && transport_box_count(&fleet) == 1)
     testing.expect(t,strings.contains(cards[0].lines[4],text.entries["transport_waiting_landing"]))
+}
+
+// One departure box per ship: concurrent missions of the same ship collapse, and a
+// pending request always represents its ship so it stays approvable.
+@(test)
+transport_boxes_group_by_ship_with_pending_priority :: proc(t: ^testing.T) {
+    arena: mem.Dynamic_Arena
+    mem.dynamic_arena_init(&arena,alignment=64)
+    defer mem.dynamic_arena_destroy(&arena)
+    text, ok := localization.decode(transmute([]byte)#load("../../assets/config/default/localization/en.json"),mem.dynamic_arena_allocator(&arena))
+    testing.expect(t,ok)
+    ships := [?]logic.Ship{{id="S",name="Shuttle"},{id="S2",name="Second"}}
+    catalog := config.Catalog{ships=ships[:]}
+    fleet := logic.Transport_State{count=3}
+    fleet.missions[0] = {id=1,ship_id="S",phase=.Outbound,destination="H1",units=1,requested=1,loaded=1,distance=10}
+    fleet.missions[1] = {id=2,ship_id="S",phase=.Awaiting_Approval,destination="H2",units=2,requested=2,distance=10}
+    fleet.missions[2] = {id=3,ship_id="S2",phase=.Loading,destination="H3",units=1,requested=1,distance=10}
+    testing.expect(t,transport_box_count(&fleet) == 2)
+    cards := transport_cards(&fleet,catalog,text.entries,{16,64,300,176},0,true)
+    testing.expect(t,len(cards) == 2)
+    // Ship S is represented by its pending request, so the rocket button is reachable.
+    testing.expect(t,cards[0].approve_id == 2)
+    testing.expect(t,cards[1].approve_id == 0)
+    testing.expect(t,strings.contains(cards[1].lines[1],"H3"))
+    // Once approved, the earliest mission of the ship takes over the single box.
+    fleet.missions[1].phase = .Loading
+    cards = transport_cards(&fleet,catalog,text.entries,{16,64,300,176},0,true)
+    testing.expect(t,len(cards) == 2)
+    testing.expect(t,cards[0].approve_id == 0)
+    testing.expect(t,strings.contains(cards[0].lines[1],"H1"))
 }

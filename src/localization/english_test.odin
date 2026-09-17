@@ -9,7 +9,7 @@ english_catalog :: proc(t: ^testing.T) {
     arena: mem.Dynamic_Arena
     mem.dynamic_arena_init(&arena, alignment=64)
     defer mem.dynamic_arena_destroy(&arena)
-    data :: #load("../../assets/localization/en.json")
+    data :: #load("../../assets/config/default/localization/en.json")
     text, ok := decode(transmute([]byte)data, mem.dynamic_arena_allocator(&arena))
     testing.expect(t, ok)
     testing.expect(t, len(text.window_title) > 0 && len(text.exit_game) > 0)
@@ -29,7 +29,7 @@ invalid_catalog :: proc(t: ^testing.T) {
         _, ok := decode(transmute([]byte)data, allocator)
         testing.expect(t, !ok)
     }
-    data :: #load("../../assets/localization/en.json")
+    data :: #load("../../assets/config/default/localization/en.json")
     text, _ := decode(transmute([]byte)data, allocator)
     empty, _ := strings.replace_all(string(data), text.window_title, "", allocator)
     _, ok := decode(transmute([]byte)empty, allocator)

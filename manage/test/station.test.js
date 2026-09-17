@@ -5,8 +5,8 @@ import { detectKind, validateDoc, validateLevel, validateKeyBindings, validateSh
 import { KEY_DEFAULTS, newShip, newStation, newStock, syncStationInstance } from '../src/lib/station.js';
 
 test('station-related shipped assets are routed and validated', () => {
-  const paths = ['config/key_bindings.json', 'config/ships.json', 'config/space_stations.json', 'config/resources.json', 'config/subjects.json', 'localization/en.json'];
-  const docs = Object.fromEntries(paths.map((p) => [p, { data: JSON.parse(readFileSync(new URL(`../../assets/${p}`, import.meta.url), 'utf8')) }]));
+  const paths = ['key_bindings.json', 'ships.json', 'space_stations.json', 'resources.json', 'subjects.json', 'localization/en.json'];
+  const docs = Object.fromEntries(paths.map((p) => [p, { data: JSON.parse(readFileSync(new URL(`../../assets/config/default/${p}`, import.meta.url), 'utf8')) }]));
   for (const path of paths.slice(0, 3)) {
     assert.notEqual(detectKind(path), 'generic');
     const issues = validateDoc(path, docs);
@@ -155,7 +155,7 @@ test('level station instance stock is complete, bounded and independent of its t
   const station = { ...newStation('orbital'), resources: [{ resource_id: 'water', capacity: 20 }], subjects: [{ subject_id: 'human', capacity: 8 }] };
   const first = syncStationInstance(null, station);
   const docs = {
-    'config/space_stations.json': { data: [station] },
+    'space_stations.json': { data: [station] },
     'levels/level_0.json': { data: { version: 1, level: 0, buildings: [], subjects: [], space_station: first } },
   };
   assert.deepEqual(validateDoc('levels/level_0.json', docs), []);

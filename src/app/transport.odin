@@ -11,20 +11,35 @@ import c "../contracts"
 transport_box_visible :: proc(mission: logic.Transport) -> bool {
     return mission.phase != .Completed && mission.phase != .Cancelled && mission.phase != .Return_Unloading
 }
-transport_box_count :: proc(fleet: ^logic.Transport_State) -> int {
+
+// One departure box per ship: concurrent missions sharing a ship collapse into a
+// single representative card. A pending request always wins so it stays approvable;
+// otherwise the earliest mission in log order represents the ship. Fills `indices`
+// with the chosen mission indices and returns how many were written.
+transport_representatives :: proc(fleet: ^logic.Transport_State, indices: []int) -> int {
     count := 0
-    for mission in fleet.missions[:fleet.count] {
-        if transport_box_visible(mission) { count += 1 }
+    for mission, index in fleet.missions[:fleet.count] {
+        if !transport_box_visible(mission) { continue }
+        existing := -1
+        for i in 0..<count {
+            if fleet.missions[indices[i]].ship_id == mission.ship_id { existing = i; break }
+        }
+        if existing < 0 { indices[count] = index; count += 1; continue }
+        if mission.phase == .Awaiting_Approval && fleet.missions[indices[existing]].phase != .Awaiting_Approval {
+            indices[existing] = index
+        }
     }
     return count
 }
 
+transport_box_count :: proc(fleet: ^logic.Transport_State) -> int {
+    indices: [logic.TRANSPORT_LIMIT]int
+    return transport_representatives(fleet,indices[:])
+}
+
 transport_cards :: proc(fleet: ^logic.Transport_State, catalog: config.Catalog, texts: map[string]string, bounds: c.Rect, first: int, all: bool = false) -> []c.Transport_Card {
     active: [logic.TRANSPORT_LIMIT]int
-    count := 0
-    for mission, index in fleet.missions[:fleet.count] {
-        if transport_box_visible(mission) { active[count] = index; count += 1 }
-    }
+    count := transport_representatives(fleet,active[:])
     visible := all ? count : ui.transport_visible(bounds)
     start := clamp(first,0,max(0,count-visible))
     cards := make([]c.Transport_Card,min(visible,count),context.temp_allocator)
@@ -35,9 +50,9 @@ transport_cards :: proc(fleet: ^logic.Transport_State, catalog: config.Catalog, 
         card.passengers = int(min(cargo,f32(20)))
         name, subject_name: string
         for ship in catalog.ships { if ship.id == mission.ship_id { name = ship.name; card.ship_color = ship.color; break } }
-        for subject in catalog.subjects { if subject.id == mission.subject_id { subject_name = texts[subject.name_key]; card.subject_color = subject.color; card.subject_sprite = subject_sprite_definitions(subject.roles, catalog); break } }
+        for subject in catalog.subjects { if subject.id == mission.subject_id { subject_name = texts[subject.name_key]; card.subject_color = subject.color; card.subject_sprite = subject_sprite_definitions(subject.roles, subject.sprite); break } }
         status_keys := [logic.Transport_Phase]string{
-            .Loading="transport_loading", .Outbound="transport_travelling", .Waiting_Landing="transport_waiting_landing",
+            .Awaiting_Approval="transport_awaiting_approval", .Loading="transport_loading", .Outbound="transport_travelling", .Waiting_Landing="transport_waiting_landing",
             .Landing="transport_landing", .Unloading="transport_unloading", .Taking_Off="transport_taking_off",
             .Braking="transport_braking", .Returning="transport_returning", .Return_Unloading="transport_return_unloading",
             .Completed="transport_arrived", .Cancelled="transport_cancelled",
@@ -61,6 +76,12 @@ transport_cards :: proc(fleet: ^logic.Transport_State, catalog: config.Catalog, 
         if eta >= 0 { eta_text, _ = strings.replace_all(texts["transport_hours_format"],"{value}",fmt.tprintf("%.0f",eta),context.temp_allocator) }
         card.lines[4], _ = strings.replace_all(texts["transport_eta_format"],"{hours}",eta_text,context.temp_allocator)
         card.lines[4], _ = strings.replace_all(card.lines[4],"{status}",status,context.temp_allocator)
+        if mission.phase == .Awaiting_Approval {
+            // No trip has started, so an ETA would be misleading: the box shows the
+            // localized request state plus the rocket approval button instead.
+            card.lines[4] = status
+            card.approve_id = mission.id
+        }
     }
     return cards
 }

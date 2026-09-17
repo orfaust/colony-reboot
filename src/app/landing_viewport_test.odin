@@ -11,7 +11,7 @@ landing_crosses_current_viewport_and_takeoff_reverses :: proc(t: ^testing.T) {
         for zoom in ([?]f32{MIN_ZOOM,1,MAX_ZOOM}) {
             camera := Camera{center={2,-1},zoom=zoom}
             // Nonzero camera/position exercises the actual world-to-screen adapter.
-            pad := building_screen_bounds(camera,{2.5,0},{2,1},viewport.x,viewport.y)
+            pad := building_screen_bounds(camera,{2.5,0},{128,64},viewport.x,viewport.y)
             start := landing_ship_bounds(pad,0)
             end := landing_ship_bounds(pad,1)
             middle := landing_ship_bounds(pad,0.5)
@@ -52,7 +52,7 @@ landing_phase_projection_preserves_holding_and_cancel_continuity :: proc(t: ^tes
     cancelled := landing_draws(&fleet,config.Catalog{},targets[:])
     testing.expect(t,cancelled[0].ship_bounds == before[0].ship_bounds)
     // Reprojection after resize/pan/zoom uses new pad bounds, never a cached Y.
-    targets[0].bounds = building_screen_bounds({center={1,1},zoom=2},{2,3},{2,1},900,600)
+    targets[0].bounds = building_screen_bounds({center={1,1},zoom=2},{2,3},{128,64},900,600)
     resized := landing_draws(&fleet,config.Catalog{},targets[:],{},900,600)
     testing.expect(t,resized[0].ship_bounds == landing_ship_bounds(targets[0].bounds,0.4))
     testing.expect(t,fleet.missions[0].landing_progress == 0.4 && fleet.missions[0].loaded == 5)

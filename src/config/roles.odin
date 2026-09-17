@@ -5,13 +5,10 @@ import "core:mem"
 import "core:os"
 import "core:strings"
 import "../logic"
-import c "../contracts"
 
 @(private)
 Role_Data :: struct {
     id, name_key: string,
-    color: c.RGB,
-    sprite: string `config:"optional"`,
 }
 
 // Nonempty path syntax only. tools/build.py validates existence and PNG contents
@@ -29,7 +26,8 @@ valid_sprite_path :: proc(path: string) -> bool {
 
 // Definitions and errors belong to allocator, including partial results on failure.
 // Resolved names borrow texts. Exactly one entry per supported simulation role is
-// required, so every existing subject role has validated presentation metadata.
+// required, so every existing subject role has validated identity metadata. Color
+// and sprite are deliberately absent: subject presentation never reads them here.
 decode_roles :: proc(data: []byte, texts: map[string]string, allocator: mem.Allocator) -> (roles: []logic.Role, error: string) {
     definitions: []Role_Data
     error = parse_typed(data, &definitions, allocator)
@@ -43,8 +41,7 @@ decode_roles :: proc(data: []byte, texts: map[string]string, allocator: mem.Allo
             if previous.id == definition.id { return nil, fmt.aprintf("subject_roles[%d]: duplicate ID %q", i, definition.id, allocator=allocator) }
         }
         if err := text_error(definition.name_key, texts, allocator); err != "" { return nil, err }
-        if definition.sprite != "" && !valid_sprite_path(definition.sprite) { return nil, fmt.aprintf("subject_roles[%d].sprite: expected a normalized assets/.../*.png path using forward slashes, without parent traversal", i, allocator=allocator) }
-        roles[i] = {id=definition.id, name=texts[definition.name_key], color=definition.color, sprite=definition.sprite}
+        roles[i] = {id=definition.id, name=texts[definition.name_key]}
     }
     for job in logic.Subject_Role {
         id := logic.subject_role_id(job)
@@ -56,8 +53,8 @@ decode_roles :: proc(data: []byte, texts: map[string]string, allocator: mem.Allo
 }
 
 @(private)
-load_roles :: proc(catalog: ^Catalog, texts: map[string]string, allocator: mem.Allocator) -> bool {
-    path :: "assets/config/subject_roles.json"
+load_roles :: proc(catalog: ^Catalog, texts: map[string]string, allocator: mem.Allocator, profile: Profile) -> bool {
+    path := profile_path(profile, "subject_roles.json", allocator)
     data, ok := os.read_entire_file(path)
     if !ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", path); return false }
     defer delete(data)

@@ -19,10 +19,10 @@ class SpriteBuildTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / 'assets/config').mkdir(parents=True)
-        (self.root / 'assets/levels').mkdir()
         self.png = self.root / 'assets/art.png'
         self.png.write_bytes(original_sprite((20, 100, 200)))
-        self.source = self.root / 'assets/config/buildings.json'
+        self.source = self.root / 'assets/config/default/buildings.json'
+        self.source.parent.mkdir(parents=True)
         self.write([{'id': 'example', 'sprite': 'assets/art.png'}])
 
     def write(self, data):
@@ -42,9 +42,10 @@ class SpriteBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r'buildings.json:\$\[0\].sprite.*art.png'):
             build.validate_assets(self.root)
 
-    def test_missing_role_and_level_paths_are_also_checked(self):
-        for folder in ['config', 'levels']:
-            path = self.root / f'assets/{folder}/additional.json'
+    def test_every_profile_is_checked(self):
+        for folder in ['default', 'experiment']:
+            path = self.root / f'assets/config/{folder}/additional.json'
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('{"nested":{"sprite":"assets/missing.png"}}', encoding='utf-8')
             with self.assertRaisesRegex(ValueError, 'nested.sprite'):
                 build.validate_assets(self.root)

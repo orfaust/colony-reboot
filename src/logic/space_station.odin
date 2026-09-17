@@ -12,12 +12,20 @@ Ship :: struct {
     name: string,
     type: string,
     sprite: string, // Optional repository-relative PNG path; borrowed catalog metadata.
-    width, height: f32, // Positive world-unit dimensions; presentation metadata.
+    width, height: f32, // Positive pixel dimensions at 100% zoom; presentation metadata.
     max_speed: f32, // Maximum speed in km per simulated hour; zero means stationary.
     max_speed_hours: f32, // Hours to accelerate from rest to max_speed; also used to brake.
     units_per_hour: f32, // Cargo throughput per simulated hour, shared by loading and unloading; zero cannot dispatch.
     subjects: []Ship_Subject,
 }
+// Validated ship roles. Medical missions use only `emergency`; ordinary cargo and
+// passenger dispatch uses `transport`. Unknown values are startup errors.
+Ship_Type_Transport :: "transport"
+Ship_Type_Emergency :: "emergency"
+valid_ship_type :: proc(type: string) -> bool {
+    return type == Ship_Type_Transport || type == Ship_Type_Emergency
+}
+
 // Transport capacity by subject type, not the current passenger manifest.
 Ship_Subject :: struct {
     subject_id: string,

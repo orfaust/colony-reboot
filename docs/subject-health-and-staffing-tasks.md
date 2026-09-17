@@ -10,6 +10,8 @@ and localization where affected, and run its listed checks plus existing regress
 
 ## 1. Configuration contracts and migration
 
+**Status:** complete.
+
 **Depends on:** none.
 
 - Add subject health thresholds, `extra_work_time`, health rates, and per-need health
@@ -30,6 +32,8 @@ and reference failures are tested in Odin and manage.
 
 ## 2. Shared views, commands, and events
 
+**Status:** complete.
+
 **Depends on:** task 1.
 
 - Define the minimum dependency-free IDs/value contracts for health, work phase,
@@ -44,6 +48,8 @@ and reference failures are tested in Odin and manage.
 all event payloads use stable IDs.
 
 ## 3. Runtime subject health and need state
+
+**Status:** complete.
 
 **Depends on:** tasks 1–2.
 
@@ -63,6 +69,8 @@ zero/one, and human/robot defaults.
 
 ## 4. Staffing-slot model and coverage
 
+**Status:** complete.
+
 **Depends on:** tasks 1–3.
 
 - Materialize stable continuous staffing slots from integer building role entries.
@@ -75,6 +83,8 @@ zero/one, and human/robot defaults.
 subjects cover slots; required coverage is deterministic and reset-safe.
 
 ## 5. Building operation under staffing loss
+
+**Status:** complete.
 
 **Depends on:** task 4.
 
@@ -91,6 +101,8 @@ state.
 
 ## 6. Shift scheduler and reservations
 
+**Status:** complete.
+
 **Depends on:** tasks 3–5.
 
 - Implement deterministic candidate ordering and exclusive reservations.
@@ -105,6 +117,8 @@ distance/ID tie-breaks, rest forecasts, invalidation, no candidate, and determin
 replay with explicit seeds where randomness is absent/introduced.
 
 ## 7. Physical handoff, normal work, overtime, and rest
+
+**Status:** complete.
 
 **Depends on:** task 6.
 
@@ -122,6 +136,8 @@ transit, role changes between shifts, and pause/time scaling.
 
 ## 8. Medical state and death
 
+**Status:** complete.
+
 **Depends on:** tasks 3 and 7.
 
 - Detect the downward crossing of `min_colony_health` once.
@@ -136,6 +152,8 @@ pickup, zero while reserved/moving/onboard, unavailable platform, request limits
 and population conservation.
 
 ## 9. Emergency ships, batching, and priority landing
+
+**Status:** complete.
 
 **Depends on:** tasks 1, 6, and 8.
 
@@ -154,6 +172,8 @@ cancellation, and exact manifest accounting.
 
 ## 10. Station hospitalization and return
 
+**Status:** complete.
+
 **Depends on:** tasks 3 and 9.
 
 - Keep patients as identified individuals rather than station stock units.
@@ -169,9 +189,11 @@ preservation across the round trip.
 
 ## 11. UI, localization, and presentation
 
+**Status:** complete.
+
 **Depends on:** tasks 2, 5, 7–10.
 
-- Add all player-facing labels/notices to `assets/localization/en.json` with stable
+- Add all player-facing labels/notices to `assets/config/default/localization/en.json` with stable
   keys; add no hardcoded Odin UI strings.
 - Present subject health, work/medical phase, role, assignment, timers, and need
   shortages in readable fixed-size info boxes.
@@ -185,6 +207,8 @@ long localized text, empty states, event ordering, and no per-frame allocation o
 asset loads; perform a documented visual smoke test.
 
 ## 12. Reload, reset, limits, and failure safety
+
+**Status:** complete.
 
 **Depends on:** tasks 1–11.
 
@@ -200,6 +224,8 @@ asset loads; perform a documented visual smoke test.
 success restarts cleanly; allocator/memory tracking and limit tests pass.
 
 ## 13. Integration and gameplay smoke
+
+**Status:** complete.
 
 **Depends on:** all previous tasks.
 

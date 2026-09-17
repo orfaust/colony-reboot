@@ -1,8 +1,21 @@
 # Subject Health, Shifts, Staffing, and Medical Evacuation
 
-Status: **planned; not implemented**. This document is the agreed behavioral
-specification. Existing `occupation`, rest/work metadata, subject needs, building
-staffing metadata, and ordinary transports do not yet implement these rules.
+Status: **agreed specification; implemented** (resource production and hourly need
+fulfillment are implemented by the [building production plan](building-production.md);
+inter-building logistics and explicit `on_demand` request generation remain deferred). This document is the
+agreed behavioral specification. The data-foundation slice implements the shared
+contracts and the runtime health/need state, the staffing slice implements
+materialized continuous slots, coverage and staffing-dependent power output, the
+scheduler plus shift lifecycle implement reservations, work trips, rest, overtime and
+the atomic handoff, the medical slice implements the threshold request, work
+release, landing-platform walk and permanent removal at zero health, and the
+emergency-transport slice dispatches and batches patients onto emergency ships with
+non-preemptive two-class priority landing and the station slice keeps patients as
+identified individuals, recovers them automatically and returns them home on
+emergency ships (see
+[Subject Runtime Contracts](subject-runtime-contracts.md)).
+Existing `occupation`, building staffing metadata, and ordinary transports do not yet
+implement the remaining medical rules.
 
 ## Goals and boundaries
 
@@ -308,6 +321,52 @@ in the lifecycle, the subject is permanently removed. Removal releases slots and
 reservations, removes or adjusts pending/onboard manifests without duplicating
 population, triggers replacement search, and emits one localized death notification.
 A dead subject cannot recover at the station.
+
+### Implementation (roadmap task 8)
+
+The medical request is per-subject authoritative state (`Medical_Status`), not a
+separate queue: at most one request per live individual, bounded by `SUBJECT_LIMIT`.
+`logic.step_medical` runs once per fixed tick immediately after the health step and
+before the shift/movement steps. It removes subjects at zero health first (one
+`Subject_Died` event each, releasing staffing claims, detaching transport manifests
+and correcting residence/station counts) and then crosses `min_colony_health` once
+per individual to `Pending_Evacuation`, releasing the slot and reservation and
+ordering the person to the first active `landing_platform` with the existing walk and
+single-file spacing. A missing or disabled platform leaves the patient safely in
+place and retries every tick. Death anywhere in the lifecycle is permanent and removes
+exactly one unit of population; the localized notice is presented by the application
+(roadmap task 11). Emergency-ship dispatch, batching, priority landing, station
+recovery and return are implemented by roadmap tasks 9 and 10 (see
+[Subject Runtime Contracts](subject-runtime-contracts.md)).
+
+### Implementation (roadmap task 9)
+
+Pending patients are dispatched only onto available `emergency` ships whose subject
+capacity includes the patient type, chosen as the first compatible ship in stable
+catalog order. Ready compatible patients of one type are batched up to capacity on
+one leg, which launches as soon as one patient is ready; an executable mission is
+never delayed to fill the ship. Emergency missions outrank ordinary missions for the
+landing platform non-preemptively (a ship already landing, unloading or taking off
+finishes) and FIFO is preserved within each class. A held emergency mission whose
+pickup platform disappears is re-targeted to another active platform, and cancelled
+cleanly with its seats and ship released only when no platform is active anywhere.
+At the station the patients unload as identified individuals
+(`medical == .Hospitalized`), never as anonymous station stock.
+
+### Implementation (roadmap task 10)
+
+Hospitalized patients remain identified individuals with stable IDs, outside station
+stock. `subject_health.odin` adds the configured `station_recovery_per_hour` to a
+hospitalized patient every fixed tick and consumes no colony or station resource.
+Once health reaches `min_work_health` (equality included), `request_medical_returns`
+switches the patient to `.Returning`; `dispatch_medical_returns` batches recovering
+patients of one subject type onto the first compatible available emergency ship, one
+leg at a time, without waiting to fill it. The return leg loads at the station, flies
+to a landed colony platform, and discharges each patient at their original residence
+through the normal walk and single-file spacing. Returned subjects are unassigned,
+fully rested, keep their stable ID and roles, and are eligible for any supported role
+immediately; each discharge emits one `Medical_Return` event. Death anywhere in the
+return lifecycle removes the subject permanently without touching stock.
 
 ## Fixed-tick order
 

@@ -57,31 +57,6 @@ warmup_ramps_output_while_need_stays_constant :: proc(t: ^testing.T) {
 }
 
 @(test)
-combined_building_needs_external_power_during_warmup :: proc(t: ^testing.T) {
-    definitions := [?]Building_Type{
-        {id="control_unit"}, {id="solar_panel",power_output_kw=16},
-        {id="combined",power_output_kw=16,power_need_kw=3,warmup_time=1,cooldown_time=1},
-    }
-    initial := [?]Building_Instance{
-        {id="CU1",building_id="control_unit",health=1}, {id="SP1",building_id="solar_panel",health=1},
-        {id="P1",building_id="combined",health=1},
-    }
-    state := new_session(initial[:], definitions[:], context.allocator)
-    defer destroy(&state, context.allocator)
-    // Its need starts at once but its output does not, so it cannot start alone.
-    testing.expect(t, toggle(&state, {id="P1"}) == .Insufficient_Power)
-    testing.expect(t, toggle(&state, {id="SP1"}) == .Applied)
-    testing.expect(t, toggle(&state, {id="P1"}) == .Applied)
-    testing.expect(t, balance(&state).available_kw == 13)
-    run_ticks(&state, 60)
-    testing.expect(t, balance(&state).available_kw == 29)
-    // Spare generation does not permit shutting down either producer.
-    testing.expect(t, toggle(&state, {id="SP1"}) == .Generator_Required)
-    testing.expect(t, toggle(&state, {id="P1"}) == .Generator_Required)
-    testing.expect(t, balance(&state).available_kw == 29)
-}
-
-@(test)
 ramps_never_create_a_deficit :: proc(t: ^testing.T) {
     definitions := [?]Building_Type{
         {id="control_unit"}, {id="generator",power_output_kw=10,warmup_time=1,cooldown_time=1},

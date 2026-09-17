@@ -1,0 +1,85 @@
+[
+  {
+    "id": "human",
+    "width": 64,
+    "height": 64,
+    "sprite": "",
+    "name_key": "subject_human_name",
+    "color": { "r": 219, "g": 72, "b": 150 },
+    "rest_time": 12,
+    "work_time": 12,
+    "extra_work_time": 4,
+    "min_work_health": 0.4,
+    "min_colony_health": 0.1,
+    "health_rates": {
+      "work_gain_per_hour": 0.002,
+      "rest_gain_per_hour": 0.01,
+      "extra_work_loss_per_hour": 0.025,
+      "max_inactivity_loss_per_hour": 0.012,
+      "inactivity_max_time": 72,
+      "station_recovery_per_hour": 0.04
+    },
+    "roles": [
+      { "role_id": "worker", "sprite": "assets/sprites/roles/worker.png" },
+      {
+        "role_id": "supervisor",
+        "sprite": "assets/sprites/roles/supervisor.png"
+      }
+    ],
+    "needs": [
+      {
+        "resource_id": "water",
+        "amount_per_hour": 0.08,
+        "shortage_alert_time": 6,
+        "shortage_max_time": 72,
+        "satisfied_health_gain_per_hour": 0.001,
+        "max_shortage_health_loss_per_hour": 0.025
+      },
+      {
+        "resource_id": "meals",
+        "amount_per_hour": 0.125,
+        "shortage_alert_time": 24,
+        "shortage_max_time": 400,
+        "satisfied_health_gain_per_hour": 0.002,
+        "max_shortage_health_loss_per_hour": 0.012
+      }
+    ],
+    "produces": [{ "resource_id": "compost", "units_per_hour": 0.01 }]
+  },
+  {
+    "id": "robot",
+    "width": 64,
+    "height": 64,
+    "sprite": "",
+    "name_key": "subject_robot_name",
+    "color": { "r": 33, "g": 159, "b": 176 },
+    "rest_time": 4,
+    "work_time": 20,
+    "extra_work_time": 8,
+    "min_work_health": 0.4,
+    "min_colony_health": 0.1,
+    "health_rates": {
+      "work_gain_per_hour": 0.0015,
+      "rest_gain_per_hour": 0.02,
+      "extra_work_loss_per_hour": 0.015,
+      "max_inactivity_loss_per_hour": 0.006,
+      "inactivity_max_time": 120,
+      "station_recovery_per_hour": 0.06
+    },
+    "roles": [
+      { "role_id": "worker", "sprite": "assets/sprites/roles/worker.png" },
+      { "role_id": "repairer", "sprite": "assets/sprites/roles/repairer.png" }
+    ],
+    "needs": [
+      {
+        "resource_id": "batteries",
+        "amount_per_hour": 0.05,
+        "shortage_alert_time": 8,
+        "shortage_max_time": 72,
+        "satisfied_health_gain_per_hour": 0.0015,
+        "max_shortage_health_loss_per_hour": 0.02
+      }
+    ],
+    "produces": []
+  }
+]

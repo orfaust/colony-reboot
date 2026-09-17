@@ -1,0 +1,14 @@
+[
+  {
+    "id": "worker",
+    "name_key": "subject_role_worker_name"
+  },
+  {
+    "id": "supervisor",
+    "name_key": "subject_role_supervisor_name"
+  },
+  {
+    "id": "repairer",
+    "name_key": "subject_role_repairer_name"
+  }
+]

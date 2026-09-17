@@ -3,7 +3,8 @@
 The logic package defines `Ship`, `Space_Station`, `Station_Resource`,
 `Station_Subject`, and `Station_Ship`. `Transport_State` simulates passenger round
 trips requested by active housing, timed handling, platform landing, single-file
-walks to housing and whole-subject station replenishment.
+walks to housing, whole-subject station replenishment and emergency medical
+evacuation of identified patients.
 The station is separate from building storage and individual level subjects; its
 counts are not automatically summed from or synchronized with them.
 
@@ -13,12 +14,13 @@ See [Ship and Subject Presentation Metadata](ship-subject-presentation.md) for t
 new fields, validation, migration and current data-only scope.
 
 `logic.Ship` has `id`, `code`, `name`, and `type` strings, an RGB `color`, optional
-`sprite` path, positive `width`/`height` in world units, plus a `subjects` array of
+`sprite` path, positive `width`/`height` in pixels at 100% zoom, plus a `subjects` array of
 `Ship_Subject` entries (`subject_id`, `capacity`). IDs are unique stable
-identifiers; `type` is a nonempty category identifier such as `transport`, not an
+identifiers; `type` is a validated category: `transport` (ordinary dispatch) or
+`emergency` (reserved for medical missions), not an
 enum with hardcoded categories. `name` is a resolved localized display string.
 
-`assets/config/ships.json` is an array. JSON uses `name_key` instead
+`assets/config/default/ships.json` is an array. JSON uses `name_key` instead
 of literal display text, in accordance with the game's localization policy:
 
 ```json
@@ -41,13 +43,13 @@ of literal display text, in accordance with the game's localization policy:
 ```
 
 To use this example, add `"ship_shuttle_name": "Colony Shuttle"` to
-`assets/localization/en.json`. The loader resolves the key into `Ship.name`.
+`assets/config/default/localization/en.json`. The loader resolves the key into `Ship.name`.
 No translation is required for `id`, `code` or `type` identifiers. `code` is a
 required nonempty display code, not a reference ID; duplicate codes are allowed.
 `color` requires integer `r`, `g`, `b` channels in [0,255].
 
 `subjects` is required; use `[]` for a ship that transports no subjects. Each entry
-references a type from `assets/config/subjects.json` through `subject_id`, not
+references a type from `assets/config/default/subjects.json` through `subject_id`, not
 `resource_id`. References are case-sensitive (`human` and `robot`, not `humans` or
 `robots`). `capacity` is a finite, nonnegative f32, consistent with station and
 resident capacities. Duplicate subject IDs within a ship are rejected. These are
@@ -66,7 +68,7 @@ The current catalog defines human transport (capacity 100) and robot transport
 - `subjects`: `{ subject_id, capacity }`
 - `ships`: `{ ship_id, units }`
 
-Initial templates are an ordered array in `assets/config/space_stations.json`.
+Initial templates are an ordered array in `assets/config/default/space_stations.json`.
 Each defines a localized name, resource/subject capacities and ship counts. An empty catalog
 (`[]`) is valid. The former singular file is replaced by this array format.
 Example of a populated configuration:
@@ -99,7 +101,7 @@ code from the uppercase ID; new ships start with neutral RGB (200,200,200).
 
 ### One station instance per level
 
-Every `assets/levels/*.json` requires a `space_station` object selecting one template:
+Every level file (`assets/config/<version>/levels/*.json`) requires a `space_station` object selecting one template:
 
 ```json
 "space_station": {
@@ -136,8 +138,15 @@ after capacity changes. Creating a level requires at least one station template.
   still requires loading, an available landing platform, landing and unloading.
   Distance is editable in the level station panel. Stock synchronization preserves it.
 - `Ship.max_speed_hours` is required, finite and nonnegative: simulated hours to
-  reach `max_speed` from rest. The same acceleration magnitude is used for braking.
-  Zero explicitly selects instantaneous acceleration/deceleration.
+  reach `max_speed` from rest. The profile is a **non-linear, jerk-limited S-curve**
+  (cubic smoothstep): acceleration starts and ends at zero, so ships ease away from
+  the station and into the colony instead of jumping to constant acceleration. The
+  same mirrored curve is used for braking, and for rescue braking when a mission is
+  cancelled mid-flight. Because the curve's integral over a ramp is half the
+  peak-time distance, ramp time, peak speed, travel duration, ETA and total stopping
+  distance are unchanged from the constant-acceleration model; only the position and
+  speed inside a ramp differ. Zero explicitly selects instantaneous
+  acceleration/deceleration and instantaneous stop.
 - `Ship.units_per_hour` is required, finite and nonnegative **cargo throughput per
   simulated hour**, including subjects. Handling N units takes `N / units_per_hour`
   hours. At 2/hour, five subjects take 2.5 hours to load and another 2.5 hours to
@@ -220,7 +229,22 @@ rates still visible. Resource stock is not advanced.
   Every completed `1 / units_per_hour` hours moves the next person from `Reserved`
   to `Onboard`. Only a fully boarded manifest can depart. Repeated reconciliation
   cannot double-book seats. Pending demand is retried each tick.
-- Travel acceleration in km/h² is `max_speed / max_speed_hours`. Long routes reach
+- An ordinary request starts in `Awaiting_Approval` and consumes no simulation time:
+  it holds its passenger reservation, destination seats and ship slot, but nothing
+  boards and no trip begins until the player approves it. The transport box shows the
+  localized `transport_awaiting_approval` status and a rocket approval button in that
+  card's bottom strip. Pressing it issues `approve_transport` with the mission's stable
+  id, which starts `Loading` exactly once; the button scrolls with its card and only
+  its panel-visible area accepts the click, which never reaches the world. Emergency (evacuation and medical)
+  missions never wait for approval. Disabling the residence while a request is pending
+  releases the reservation and ship without a return leg.
+- Travel uses a non-linear, jerk-limited profile rather than constant acceleration.
+  Normalized ramp velocity is the cubic smoothstep `3x² - 2x³` and its integral is
+  exactly half the ramp, so the old `max_speed / max_speed_hours` figures still define
+  ramp time, peak speed, triangular short routes and total duration. Peak
+  acceleration during a ramp is `1.5 * max_speed / max_speed_hours`; velocity and
+  acceleration are continuous at ramp ends. A mid-flight cancel begins braking from
+  zero acceleration and eases smoothly into rest. Long routes reach
   the configured maximum; short routes use a triangular profile without exceeding it.
   Position and speed are analytic, not accumulated per frame. The outbound flight
   ends at rest at `max(0, distance - 1)` km from the station. The final <=1 km is the
@@ -283,7 +307,7 @@ waits while a committed evacuation still has residents to board.
 - During loading: cancel departure, immediately release unboarded individuals back
   to available stock, and unload only people already aboard at the configured rate.
   The ship becomes available after its last passenger exits.
-- During outbound flight: brake with the configured acceleration (retaining position
+- During outbound flight: brake along the mirrored non-linear curve (retaining position
   and velocity continuity), then start an accelerated/decelerated return leg from the
   stopping point. Waiting ships return directly from the approach point.
 - During landing/unloading: stop further deliveries, reverse the vertical animation
@@ -340,7 +364,7 @@ and repeated reconciliation cannot reserve a person twice.
   for an evacuation and is shown using the localized loading status. The next
   manifest person must physically arrive before their service interval can accrue.
   One whole person boards per `1 / ship.units_per_hour` hours; only then does the
-  residence count decrease and the person's residence/occupation assignment clear.
+  residence count decrease and the person's residence/initial-assignment metadata clear.
   The ship waits for every manifest member and never banks handling credit while
   waiting for walkers. The box shows only actual onboard people and unknown ETA
   before pickup completes. `Transport.arrived` means colony service completed: for
@@ -376,10 +400,53 @@ reach zero, follow individual walkers to the platform, observe pickup loading an
 station unloading, and compare population before/after. Repeat with no free ship,
 a busy pad and a full station; then provide the missing capacity and verify resumption.
 
+## Medical emergency transport
+
+Colony individuals whose health reaches their type's `min_colony_health` request a
+medical evacuation and walk to a landing platform (see
+[Subject health and staffing](subject-health-and-staffing.md)). Medical dispatch runs
+inside `dispatch_transports` and uses only `emergency` ships; ordinary transports
+never carry patients.
+
+- **Selection and batching:** for each ready subject type the leg uses the first
+  available emergency ship in stable catalog order whose `subjects` capacity
+  includes that type. Ready compatible patients are batched up to whole shipped
+  capacity on one leg, which launches as soon as one patient is ready: an executable
+  mission is never delayed to fill the ship. A leg carries one subject type.
+- **Landing priority:** medical missions outrank ordinary missions non-preemptively.
+  A ship already landing, unloading or taking off keeps the pad; among ships holding
+  for a pad, every medical mission is admitted before any ordinary mission (including
+  residence evacuations, which form one shared ordinary class), and FIFO by arrival
+  ticket is preserved within each class.
+- **Robustness:** a held medical leg whose pickup pad disappears is re-targeted to
+  another active platform; with no active platform anywhere it is cancelled through
+  the withdraw path, its seats return the patients to pending and the ship returns to
+  base. A boarded leg is never cancelled.
+- **Discharge:** at the station the patients unload as identified
+  `medical == .Hospitalized` individuals with their stable IDs, not as anonymous
+  station stock; `stock.units` is not incremented.
+- **Recovery and return:** a hospitalized patient recovers automatically at their
+  type's `station_recovery_per_hour`, consuming no resources. At `min_work_health`
+  the patient becomes `.Returning` and `dispatch_medical_returns` batches them onto
+  the first compatible available emergency ship (same selection and batching rules).
+  The leg loads at the station, flies to a colony platform and discharges each patient
+  at their original residence; they keep their stable ID and roles, return unassigned
+  and fully rested, and are immediately eligible for any supported role. Each
+  discharge emits one `Medical_Return` event. A patient who dies at any point is
+  removed permanently and never returned.
+
+Each leg allocates one manifest, freed on completion, reset or shutdown. Headless
+regressions cover partial/full batches, split remainders, first-compatible selection,
+dual-type ships, incompatible and unavailable ships, the mission limit, two-class
+priority, ordinary waiter ordering, retarget, clean cancellation, station discharge,
+recovery boundary, return batching and landing wait, death exclusion and exact
+manifest accounting across the full round trip.
+
 ## Individual subjects and colony commands
 
 `Transport_State.subjects` owns `Runtime_Subject` instances: unique session `Subject_ID`,
-optional original level `source_id`, type ID, roles, residence, occupation, current
+optional original level `source_id`, type ID, roles, residence, occupation (derived from
+the initial assignment until the shift systems replace it), current
 activity, world position, target, speed and individual queue timer. Initial level
 subjects preserve their configured identity metadata and speed. Any additional
 `residents_amount` occupants and initial station stock are also materialized as
@@ -402,9 +469,10 @@ both IDs and the subject's availability, then updates only that individual's tar
 It returns `Applied`, `Unknown_Subject`, `Unknown_Destination`, or `Unavailable`.
 Transport-owned subjects cannot be redirected before discharge. Commands are applied
 synchronously, in caller order; no hidden callbacks or queues. Residence remains the
-housing assignment when a separate movement destination changes. Autonomous work,
-needs/rest cycles, collision avoidance and pathfinding are not implemented by this
-change; the current automatic colony request is housing delivery.
+housing assignment when a separate movement destination changes. Autonomous shifts,
+reservations, needs/rest cycles and staffing are implemented by the subject
+simulation; collision avoidance and pathfinding are not implemented. The current
+automatic colony request in this module remains housing delivery.
 
 Storage is bounded to 16,384 live subject slots. Startup overflows fail validation
 in Odin and manage. Replenishment pauses at the limit without creating phantom stock;
@@ -433,10 +501,17 @@ are capped to card space (up to 20); text reports the actual full onboard count:
 while unloading. Reserved people not yet boarded do not appear as onboard cargo.
 Wheel over the panel scrolls measured card content by pixels, including within tall
 cards, rather than zooming the world; clicks do not
-activate buildings underneath. Each active mission has its own card, including
-empty return flights and cancelled trips returning cargo. Cards disappear on reaching
-the station (before return unloading); finished history does not occupy panel slots.
-Scrolling and overlay bounds use only visible missions, and clamp when cards disappear.
+activate buildings underneath. The panel shows **one card per ship**: concurrent
+missions that share a ship (its `units` allow several) collapse into a single box,
+including empty return flights and cancelled trips returning cargo. A pending
+`Awaiting_Approval` request always represents its ship so the player can still
+launch it; otherwise the earliest mission in log order represents the ship. Cards
+disappear on reaching the station (before return unloading); finished history does
+not occupy panel slots. Scrolling and overlay bounds use only the grouped visible
+cards, and clamp when cards disappear.
+A card whose mission is `Awaiting_Approval` shows its localized status in place of
+an ETA and draws the rocket approval button in the bottom-right of its icon strip,
+so text and placeholder icons never overlap it.
 
 Presentation regression smoke (verified with the real raylib backend):
 

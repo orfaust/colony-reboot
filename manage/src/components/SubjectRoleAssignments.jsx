@@ -4,9 +4,9 @@ import PathInput from './PathInput.jsx';
 import ExtraFields from './ExtraFields.jsx';
 import { SUBJECT_ROLES, subjectRoleSchema, validSpritePath, SPRITE_PATH_ERROR } from '../lib/schema.js';
 import { roleLabel } from '../lib/roles.js';
-import { isPlainObject, moveItem, rgbToHex } from '../lib/object.js';
+import { isPlainObject, moveItem } from '../lib/object.js';
 
-export default function SubjectRoleAssignments({ value, onChange, ctx }) {
+export default function SubjectRoleAssignments({ value, onChange, ctx, subjectSprite = '' }) {
   const [selected, select] = useState(0);
   const [adding, setAdding] = useState('');
   const malformed = value !== null && !Array.isArray(value);
@@ -22,12 +22,11 @@ export default function SubjectRoleAssignments({ value, onChange, ctx }) {
     else if (index === to) select(from);
   };
   const label = (row, i) => typeof row?.role_id === 'string' ? roleLabel(row.role_id, ctx) : `Invalid role ${i + 1}`;
-  const metadata = (id) => Array.isArray(ctx.subject_roles) ? ctx.subject_roles.find((r) => r?.id === id) : null;
   const duplicate = rows.some((r, i) => i !== index && r?.role_id === item?.role_id);
   const repairId = SUBJECT_ROLES.includes(item) && available.includes(item) ? item : addId;
   return <section className="panel subject-role-assignments">
     <div className="detail-header"><h3>Roles</h3><span className="muted">{rows.length} assigned</span></div>
-    <p className="hint">Assign each role at most once. An empty sprite override uses the role catalog sprite.</p>
+    <p className="hint">Assign each role at most once. An empty sprite override falls back to the subject sprite, then to the subject color.</p>
     {malformed && <div className="callout error">Expected an array or null. Loaded data has not been converted.
       <button type="button" className="btn danger" onClick={() => {
         if (confirm('Replace malformed roles with null (no roles)? This can be undone.')) { onChange(null); select(null); }
@@ -39,7 +38,6 @@ export default function SubjectRoleAssignments({ value, onChange, ctx }) {
         {!rows.length && <p className="empty small">No roles.</p>}
         <ul className="item-list">{rows.map((r, i) => <li key={i}>
           <button type="button" className={i === index ? 'active' : ''} aria-pressed={i === index} onClick={() => select(i)}>
-            <span className="swatch" style={{ background: rgbToHex(metadata(r?.role_id)?.color) }} />
             <span className="item-title">{label(r, i)}</span>
             <span className="item-meta">{typeof r?.sprite === 'string' && r.sprite ? 'Override' : 'Inherited'}</span>
           </button>
@@ -71,10 +69,10 @@ export default function SubjectRoleAssignments({ value, onChange, ctx }) {
                 options={SUBJECT_ROLES.filter((id) => id === item.role_id || available.includes(id)).map((id) => ({ value: id, label: roleLabel(id, ctx) }))}
                 onChange={(role_id) => update({ ...item, role_id }, 'role_id')} />
             </Field>
-            <Field label="Sprite path" hint="Optional assets/.../*.png override; empty uses role catalog sprite." error={validSpritePath(item.sprite) ? null : SPRITE_PATH_ERROR}>
+            <Field label="Sprite path" hint="Optional assets/.../*.png override; empty uses the subject sprite." error={validSpritePath(item.sprite) ? null : SPRITE_PATH_ERROR}>
               <PathInput value={item.sprite} onChange={(sprite) => update({ ...item, sprite }, 'sprite')} />
             </Field>
-            <p className="hint">Catalog sprite: <code>{metadata(item.role_id)?.sprite || '(none — color fallback)'}</code></p>
+            <p className="hint">Subject sprite: <code>{subjectSprite || '(none — color fallback)'}</code></p>
           </div> : <div className="callout error">Invalid role entry. Repair it in JSON or replace it explicitly.
             <button type="button" className="btn" disabled={!repairId} onClick={() => update({ role_id: repairId, sprite: '' }, 'repair')}>Repair as object</button>
           </div>}

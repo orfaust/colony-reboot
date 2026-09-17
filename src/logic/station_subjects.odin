@@ -7,6 +7,9 @@ import "core:math"
 station_reserved_subjects :: proc(state: ^Transport_State, subject_id: string) -> f64 {
     reserved: f64
     for mission in state.missions[:state.count] {
+        // Medical patients enter the station as identified individuals, not stock,
+        // so they never reserve stock replenishment capacity.
+        if mission.medical { continue }
         if mission.subject_id == subject_id && mission.phase != .Completed && mission.phase != .Cancelled {
             reserved += f64(mission.units-mission.delivered-mission.returned)
         }
@@ -36,7 +39,7 @@ step_station_subjects :: proc(state: ^Transport_State) {
         change := int(clamp(next-f64(stock.units),-f64(SUBJECT_LIMIT),f64(SUBJECT_LIMIT)))
         if change > 0 {
             for _ in 0..<change {
-                if add_runtime_subject(state,{subject_id=stock.subject_id,activity=.Station}) < 0 {
+                if add_runtime_subject(state,{subject_id=stock.subject_id,health=1,activity=.Station}) < 0 {
                     state.stock_fraction[i] = 0
                     break
                 }
@@ -44,7 +47,7 @@ step_station_subjects :: proc(state: ^Transport_State) {
             }
         } else if change < 0 {
             for &subject in state.subjects {
-                if subject.subject_id != stock.subject_id || subject.activity != .Station { continue }
+                if subject.subject_id != stock.subject_id || subject.activity != .Station || subject.medical != .None { continue }
                 subject.activity = .Removed
                 stock.units -= 1
                 change += 1

@@ -9,5 +9,7 @@
   "zoom_out": ["wheel:down"],
   "pan": ["mouse:right", "mouse:middle"],
   "speed_up": ["key:e"],
-  "slow_down": ["key:q"]
+  "slow_down": ["key:q"],
+  "overview_buildings": ["key:b"],
+  "overview_subjects": ["key:s"]
 }

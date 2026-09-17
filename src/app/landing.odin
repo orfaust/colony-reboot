@@ -55,7 +55,7 @@ landing_draws :: proc(fleet: ^logic.Transport_State, catalog: config.Catalog, ta
             rect := c.Rect{point.x-4.5,point.y-16,9,16}
             if rect.x+9 < 0 || rect.y+16 < 0 || rect.x > width || rect.y > height { continue }
             append(&passengers,rect)
-            append(&sprites,subject_sprite(subject.roles, catalog, definition.roles))
+            append(&sprites,subject_sprite(subject.roles, definition.roles, definition.sprite))
         }
         if len(passengers) > 0 { append(&draws,render.Landing_Draw{subject_color=definition.color,passengers=passengers[:],passenger_sprites=sprites[:]}) }
     }

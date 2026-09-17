@@ -63,11 +63,13 @@ pan_camera :: proc(camera: ^Camera, dx, dy: f32) {
     camera.center.y -= dy/scale
 }
 
-// Position and size are world units; authoritative positions never change with
-// the camera. The building pivot is its center.
+// Position is world units (64 screen pixels each); size is already screen pixels at
+// zoom 1, matching the catalog pixel dimensions. Both scale with the camera zoom so
+// a configured 64x64 building draws 64x64 at 100% zoom. Authoritative positions never
+// change with the camera. The building pivot is its center.
 building_screen_bounds :: proc(camera: Camera, position, size: c.Vector2, viewport_width, viewport_height: f32) -> c.Rect {
     scale := WORLD_SCALE*camera.zoom
-    width, height := size.x*scale, size.y*scale
+    width, height := size.x*camera.zoom, size.y*camera.zoom
     return {
         viewport_width/2 + (position.x-camera.center.x)*scale - width/2,
         viewport_height/2 + (position.y-camera.center.y)*scale - height/2,

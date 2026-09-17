@@ -15,7 +15,7 @@ find_station :: proc(catalog: Catalog, id: string) -> (logic.Space_Station, bool
 validate_station_instance :: proc(instance: logic.Station_Instance, catalog: Catalog, allocator: mem.Allocator) -> string {
     if !logic.valid_station_stock(0, instance.distance, 0) { return "space_station.distance: must be finite and nonnegative (km)" }
     station, found := find_station(catalog, instance.station_id)
-    if !found { return fmt.aprintf("space_station.station_id: unknown ID %q; define it in assets/config/space_stations.json", instance.station_id, allocator=allocator) }
+    if !found { return fmt.aprintf("space_station.station_id: unknown ID %q; define it in space_stations.json", instance.station_id, allocator=allocator) }
     for stock, i in instance.resources {
         capacity: f32
         exists := false

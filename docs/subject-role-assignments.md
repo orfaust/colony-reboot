@@ -1,6 +1,6 @@
 # Subject Role Assignments
 
-In `assets/config/subjects.json`, `roles` is now an ordered array of objects:
+In `assets/config/default/subjects.json`, `roles` is now an ordered array of objects:
 
 ```json
 "roles": [
@@ -19,7 +19,9 @@ itself remains required and accepts null or [] for no roles.
 Migrate each catalog string such as `"worker"` to
 `{ "role_id": "worker", "sprite": "" }`. Do not migrate level-instance `roles`:
 those remain arrays of string IDs, validated against the type's `role_id` values.
-The global `subject_roles.json` metadata schema is unchanged.
+The role catalog `subject_roles.json` has since dropped its `color` and `sprite`
+properties and keeps only `id` and `name_key`; subject rendering never reads it for
+presentation.
 
 ## Ownership and presentation
 
@@ -32,12 +34,13 @@ Gameplay eligibility and inspector role counts remain enum-based.
 
 The application stages nonempty assignment sprites at startup/development reload.
 For each eligible role in declared order, presentation selects its per-type sprite
-if set, otherwise the global role sprite. The first role with either sprite wins;
-without any sprite the existing color fallback remains. Moving subjects only
+if set, otherwise `subject.sprite`, and finally the subject type color. The first
+role with a sprite wins; role order never affects eligibility or job assignment. Moving subjects only
 consider their individual role IDs; transport cards use the type's role order.
 Build-time asset validation already recursively checks these paths. No new artwork
 is supplied and shipped overrides are empty, so shipped visuals are unchanged.
-Subject-level `sprite`, `width` and `height` remain metadata as before.
+Subject-level `width`/`height` remain unused presentation metadata. `subject.sprite`
+is the fallback image, and per-role overrides win over it.
 
 ## Editor
 

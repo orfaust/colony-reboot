@@ -1,8 +1,7 @@
-import PathInput from './PathInput.jsx';
 import { useCatalogSelection } from './useCatalogSelection.js';
-import { ColorInput, Field, RefSelect, TextInput, TextKeyInput } from './fields.jsx';
+import { Field, RefSelect, TextKeyInput } from './fields.jsx';
 import ExtraFields from './ExtraFields.jsx';
-import { isPlainObject, moveItem, rgbToHex } from '../lib/object.js';
+import { isPlainObject, moveItem } from '../lib/object.js';
 import { SUBJECT_ROLES, roleSchema, validateRoles } from '../lib/schema.js';
 import { newRole } from '../lib/roles.js';
 
@@ -41,7 +40,6 @@ export default function SubjectRolesEditor({ data, onChange, ctx }) {
       {data.length === 0 && <p className="empty small">No roles. Add the required roles to begin.</p>}
       <ul className="item-list">{data.map((entry, i) => <li key={i}>
         <button type="button" className={current === i ? 'active' : ''} aria-pressed={current === i} onClick={() => setSelected(i)}>
-          <span className="swatch" style={{ background: rgbToHex(entry?.color) }} />
           <span className="item-title">{label(entry, i)}</span>
           <span className="item-meta">{typeof entry?.id === 'string' ? entry.id : `#${i}`}</span>
         </button>
@@ -56,14 +54,12 @@ export default function SubjectRolesEditor({ data, onChange, ctx }) {
         <div className="detail-header"><div><span className="eyebrow">Subject role #{current}</span><h2>{label(role, current)}</h2></div>
           <button type="button" className="btn danger" onClick={remove}>Remove</button>
         </div>
-        <p className="hint">Metadata for worker, supervisor and repairer. Optional PNG paths are validated by python tools/build.py; empty paths use color.</p>
+        <p className="hint">Identity metadata for worker, supervisor and repairer. Subject sprites and colors live on the subject type and its per-role overrides.</p>
         {!isPlainObject(role) ? <p className="callout error">Invalid role at index {current}. Repair it in the JSON tab.</p> : <div key={current}>
           <ExtraFields value={role} schema={roleSchema} onChange={(next) => onChange(data.map((r, i) => i === current ? next : r))} />
           <div className="form-grid">
             <Field label="ID" error={error('id')}><RefSelect value={role.id} options={SUBJECT_ROLES.map((id) => ({ value: id }))} onChange={(id) => set('id', id)} /></Field>
             <Field label="Name key" error={error('name_key')}><TextKeyInput value={role.name_key} texts={ctx.texts} onCreateKey={ctx.onCreateTextKey} onEditKey={ctx.onEditTextKey} onRenameKey={ctx.onRenameTextKey} onChange={(v) => set('name_key', v)} /></Field>
-            <Field label="Color" error={error('color')}><ColorInput value={role.color} onChange={(v) => set('color', v)} /></Field>
-            <Field label="Sprite path" hint="Optional PNG path. Empty uses color; python tools/build.py checks files." error={error('sprite')}><PathInput value={role.sprite} onChange={(v) => set('sprite', v)} /></Field>
           </div>
         </div>}
       </>}

@@ -27,11 +27,12 @@ level_bar_sits_beside_building :: proc(t: ^testing.T) {
 building_dimensions_and_center_pivot :: proc(t: ^testing.T) {
     sizes := [?][2]f32{{640,360}, {1280,720}, {1920,1080}}
     for size in sizes {
-        square := building_screen_bounds(DEFAULT_CAMERA, {0,0}, {1.5,1.5}, size[0], size[1])
+        // Catalog dimensions are pixels at 100% zoom; they are not scaled by WORLD_SCALE again.
+        square := building_screen_bounds(DEFAULT_CAMERA, {0,0}, {96,96}, size[0], size[1])
         testing.expect(t, square.width == 96 && square.height == 96)
         testing.expect(t, square.x+square.width/2 == size[0]/2)
         testing.expect(t, square.y+square.height/2 == size[1]/2)
-        rectangle := building_screen_bounds(DEFAULT_CAMERA, {2,-1}, {2,0.5}, size[0], size[1])
+        rectangle := building_screen_bounds(DEFAULT_CAMERA, {2,-1}, {128,32}, size[0], size[1])
         testing.expect(t, rectangle.width == 128 && rectangle.height == 32)
         testing.expect(t, rectangle.x+rectangle.width/2 == size[0]/2+128)
         testing.expect(t, rectangle.y+rectangle.height/2 == size[1]/2-64)
@@ -41,7 +42,7 @@ building_dimensions_and_center_pivot :: proc(t: ^testing.T) {
 @(test)
 zoom_scales_building_size :: proc(t: ^testing.T) {
     camera := Camera{zoom=2}
-    bounds := building_screen_bounds(camera, {1,0}, {1,1}, 1280, 720)
+    bounds := building_screen_bounds(camera, {1,0}, {64,64}, 1280, 720)
     testing.expect(t, bounds.width == 128 && bounds.height == 128)
     testing.expect(t, bounds.x+bounds.width/2 == 640+128)
 }

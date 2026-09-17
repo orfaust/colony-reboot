@@ -13,7 +13,7 @@ Text :: struct {
     hud_clock_format: string, // Requires {hours} and {speed}.
     notice_insufficient_power, notice_generator_required, notice_control_unit_locked, notice_always_on_locked: string,
     notice_insufficient_health: string,
-    play, load, settings, exit_game: string,
+    play, resume_game, load, settings, exit_game: string,
     building_control_unit_name, building_control_unit_description: string,
     load_unavailable, settings_unavailable: string,
 }
@@ -34,7 +34,7 @@ decode :: proc(data: []byte, allocator: mem.Allocator) -> (text: Text, ok: bool)
             return {}, false
         }
     }
-    for key in ([?]string{"transport_loading", "transport_waiting_landing", "transport_landing", "transport_unloading", "transport_taking_off", "transport_braking", "transport_returning", "transport_return_unloading", "transport_cancelled", "transport_eta_unknown", "transport_travelling", "transport_arrived", "transport_cargo_format", "transport_trip_format", "transport_speed_format", "transport_eta_format"}) {
+    for key in ([?]string{"transport_loading", "transport_waiting_landing", "transport_landing", "transport_unloading", "transport_taking_off", "transport_braking", "transport_returning", "transport_return_unloading", "transport_cancelled", "transport_eta_unknown", "transport_awaiting_approval", "transport_travelling", "transport_arrived", "transport_cargo_format", "transport_trip_format", "transport_speed_format", "transport_eta_format"}) {
         if strings.trim_space(text.entries[key]) == "" {
             fmt.eprintf("Localization: missing required key %q.\n",key)
             return {}, false
@@ -86,14 +86,32 @@ decode :: proc(data: []byte, allocator: mem.Allocator) -> (text: Text, ok: bool)
             return {}, false
         }
     }
+    // Notices about a specific building name it by its localized type name and
+    // level instance ID, never by the short catalog code.
+    for key in ([?]string{"notice_staffing_lost", "notice_staffing_restored", "notice_insufficient_power", "notice_insufficient_health", "notice_always_on_locked", "notice_generator_required", "notice_production_blocked", "notice_production_resumed"}) {
+        for token in ([?]string{"{name}", "{id}"}) {
+            if !strings.contains(text.entries[key],token) {
+                fmt.eprintf("Localization: %q must contain %s.\n", key, token)
+                return {}, false
+            }
+        }
+    }
+    // The grouped power-shed notice lists the affected buildings through the single
+    // {buildings} placeholder; it must never carry a per-building identity.
+    if !strings.contains(text.entries["notice_power_shed"],"{buildings}") {
+        fmt.eprintf("Localization: %q must contain %s.\n", "notice_power_shed", "{buildings}")
+        return {}, false
+    }
     for token in ([?]string{"{hours}", "{speed}"}) {
         if !strings.contains(text.hud_clock_format, token) {
             fmt.eprintf("Localization: %q must contain %s.\n", "hud_clock_format", token)
             return {}, false
         }
     }
-    for key in ([?]string{"window_title", "menu_title", "play", "load", "settings", "exit_game",
+    for key in ([?]string{"window_title", "menu_title", "play", "resume_game", "load", "settings", "exit_game",
         "notice_insufficient_power", "notice_generator_required", "notice_control_unit_locked", "notice_always_on_locked", "notice_insufficient_health",
+        "notice_staffing_lost", "notice_staffing_restored", "notice_medical_evacuation", "notice_medical_return", "notice_subject_died",
+        "notice_production_blocked", "notice_production_resumed", "notice_power_shed",
         "building_control_unit_name", "building_control_unit_description", "load_unavailable", "settings_unavailable"}) {
         if strings.trim_space(text.entries[key]) == "" {
             fmt.eprintf("Localization: missing or empty required key %q.\n", key)
@@ -101,14 +119,30 @@ decode :: proc(data: []byte, allocator: mem.Allocator) -> (text: Text, ok: bool)
         }
     }
     if !validate_inspector_text(text.entries) { return {}, false }
+    for key in ([?]string{
+        "modal_buildings_toggle", "modal_subjects_toggle", "modal_buildings_title", "modal_subjects_title",
+        "modal_scroll_hint", "modal_none",
+        "grid_building_code", "grid_building_name", "grid_building_state", "grid_building_health",
+        "grid_building_activity", "grid_building_power_out", "grid_building_power_need",
+        "grid_building_residents", "grid_building_staffing", "grid_building_needs", "grid_building_products", "grid_building_storage",
+        "grid_subject_id", "grid_subject_name", "grid_subject_health", "grid_subject_phase",
+        "grid_subject_residence", "grid_subject_occupation", "grid_subject_role", "grid_subject_medical", "grid_subject_timers",
+    }) {
+        if strings.trim_space(text.entries[key]) == "" {
+            fmt.eprintf("Localization: missing or empty required key %q.\n", key)
+            return {}, false
+        }
+    }
     return text, true
 }
 
-load_english :: proc(allocator: mem.Allocator) -> (Text, bool) {
-    path :: "assets/localization/en.json"
+// `path` is the repository-relative localization file, chosen by the active
+// configuration profile (`assets/config/<profile>/localization/en.json`). The caller
+// owns the path string; it only has to outlive this call.
+load_english :: proc(path: string, allocator: mem.Allocator) -> (Text, bool) {
     data, read_ok := os.read_entire_file(path)
     if !read_ok {
-        fmt.eprintf("Cannot read %s. Start the game from the repository root.\n", path)
+        fmt.eprintf("Cannot read %s. Start the game from the repository root, or select another profile with --config <name>.\n", path)
         return {}, false
     }
     defer delete(data)

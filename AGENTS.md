@@ -9,8 +9,15 @@ These guidelines apply to the entire repository.
 - Keep the logic, UI, and render modules separate, while allowing them to communicate through explicit contracts.
 - Support the possibility of a future 3D renderer without coupling game rules or UI behavior to the current 2D implementation. Do not implement speculative 3D systems now.
 - Write all documentation and code comments in English. Use English identifiers as well.
-- Store every player-facing UI text in a separate localization JSON file, never in Odin code. This includes window titles, menu labels, messages, tooltips, and future widgets. For now, support English only through `assets/localization/en.json` using stable named keys.
+- Store every player-facing UI text in a separate localization JSON file, never in Odin code. This includes window titles, menu labels, messages, tooltips, and future widgets. For now, support English only through `localization/en.json` of the active configuration version (`assets/config/default/localization/en.json` by default) using stable named keys.
 - Load and validate localization once at startup; keep its strings alive while the UI uses them. Missing files, invalid JSON, or missing/empty required text must produce actionable diagnostics rather than hardcoded UI fallbacks. Developer-only console diagnostics are not UI text.
+
+## Configuration Versions
+
+- Keep every JSON configuration file of a version inside `assets/config/<version>`: the catalogs (`buildings.json`, `resources.json`, `subjects.json`, `subject_roles.json`, `ships.json`, `space_stations.json`, `key_bindings.json`), the levels (`levels/level_*.json`) and the localization (`localization/en.json`). Sprites and fonts stay shared under `assets/sprites` and `assets/fonts`.
+- `default` is the shipped version and the loader fallback. Create another version only by copying `default`, and edit it through the asset manager or by hand; never split one version across directories.
+- Version names are one safe path segment (1-64 letters, digits, `-`, `_`). Reject anything else before building a path, so a mistyped argument cannot escape `assets/config`.
+- Select the version at runtime; do not hardcode it. New code reads paths through `config.Profile`/`config.profile_path` rather than spelling `assets/config/...` inline, and error messages name the file, not a fixed version directory.
 
 The project starts with a window and main menu using Odin's vendored raylib. The architecture below also defines expectations for future gameplay; do not assume unimplemented systems already exist. See README.md for the current toolchain and verified commands.
 
@@ -129,6 +136,35 @@ Application adapters + UI -> Render descriptions -> Render backend
 - Apply this convention going forward, including nested element editors when they
   are introduced or redesigned. Do not rewrite unrelated existing editors merely
   to enforce it; any migration must stay within the requested task's scope.
+
+## Player-Facing Notice Convention
+
+- A notice that reports an event about a specific entity must name that entity
+  with its stable display identifier, never a generic "a building", "this
+  building" or "a subject" phrase. Building notices use the localized building
+  type name plus the level instance ID, for example
+  `{name} ({id}) lost its staffing...` rendering as `Meals Factory (MF1)`; the
+  short catalog `code` is not a notice identity.
+- Localization templates for such notices declare the placeholders (`{name}` and
+  `{id}` today) and validation rejects a template without either. A template that
+  still contains a placeholder must never reach `ui.show_notice` uncomposed.
+- Compose per-entity text once at load time (`build_building_notices` and
+  `BUILDING_NOTICE_KEYS`) so the bounded notice log keeps borrowing persistent
+  arena/localization storage and never allocates per event. Adding a new
+  building-specific template means adding its key there, plus the `{name}` and
+  `{id}` validation and schema/metadata entries.
+- A grouped notice that reports one event affecting several entities uses a single
+  list placeholder (`{buildings}` for automatic load shedding), lists the affected
+  entities in event order using the same stable identity as the per-entity notices,
+  and is emitted once per tick, never once per entity. Compose it into preallocated
+  session storage (the `Power_Shed_Notices` ring): a grouped notice must not allocate
+  per event either.
+- Subject-specific notices name the subject by its localized type name and runtime
+  ID. If a new subject notice needs that, extend the same precomposition pattern
+  rather than formatting into frame-temporary memory, which would dangle once the
+  frame ends.
+- Apply this going forward: new notices follow the convention, and existing generic
+  notices are migrated only when the change is in scope.
 
 ## Agent Workflow and Definition of Done
 

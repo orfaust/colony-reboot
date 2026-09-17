@@ -28,18 +28,23 @@ transport_test_init :: proc(r: ^Transport_Test, distance: f32 = 3601, handling: 
 transport_test_stock :: proc(r: ^Transport_Test, units: int) {
     for &subject in r.fleet.subjects { if subject.activity == .Station { subject.activity = .Removed } }
     r.fleet.stock[0].units = f32(units)
-    for _ in 0..<units { add_runtime_subject(&r.fleet,{subject_id="human",activity=.Station}) }
+    for _ in 0..<units { add_runtime_subject(&r.fleet,{subject_id="human",health=1,activity=.Station}) }
 }
 transport_test_destroy :: proc(r: ^Transport_Test) {
     destroy_transports(&r.fleet,context.allocator)
     destroy(&r.game,context.allocator)
 }
+transport_test_approve_all :: proc(r: ^Transport_Test) {
+    for mission in r.fleet.missions[:r.fleet.count] { approve_transport(&r.fleet,mission.id) }
+}
 transport_test_activate :: proc(r: ^Transport_Test, id: string = "H") {
     toggle(&r.game,{id=id})
     dispatch_transports(&r.fleet,&r.game,r.definitions[:])
+    // Ordinary requests wait for approval; tests exercise the launched mission.
+    transport_test_approve_all(r)
 }
 transport_test_ticks :: proc(r: ^Transport_Test, ticks: int) {
-    for _ in 0..<ticks { step(&r.game); step_transports(&r.fleet,&r.game,r.definitions[:]) }
+    for _ in 0..<ticks { transport_test_approve_all(r); step(&r.game); step_transports(&r.fleet,&r.game,r.definitions[:]) }
 }
 
 @(test)
@@ -54,6 +59,7 @@ transport_loading_landing_unloading_and_reset :: proc(t: ^testing.T) {
     r.game.buildings[1].health = 1
     transport_test_activate(&r)
     testing.expect(t,r.fleet.count == 1 && r.fleet.reserved[1] == 5 && r.fleet.stock[0].units == 5)
+    testing.expect(t,r.fleet.missions[0].phase == .Loading) // Approving starts boarding.
     dispatch_transports(&r.fleet,&r.game,r.definitions[:])
     testing.expect(t,r.fleet.count == 1)
     transport_test_ticks(&r,14)
@@ -76,6 +82,43 @@ transport_loading_landing_unloading_and_reset :: proc(t: ^testing.T) {
     reset(&r.game,r.initial[:])
     reset_transports(&r.fleet,r.instance,r.initial[:],nil)
     testing.expect(t,r.fleet.count == 0 && r.fleet.stock[0].units == 10 && r.fleet.available[0].units == 2)
+    testing.expect(t,r.fleet.next_mission_id == 0)
+}
+
+@(test)
+transport_ordinary_request_waits_for_approval :: proc(t: ^testing.T) {
+    r: Transport_Test
+    transport_test_init(&r)
+    defer transport_test_destroy(&r)
+    toggle(&r.game,{id="H"})
+    dispatch_transports(&r.fleet,&r.game,r.definitions[:])
+    testing.expect(t,r.fleet.count == 1 && r.fleet.missions[0].phase == .Awaiting_Approval)
+    testing.expect(t,r.fleet.missions[0].id != 0 && r.fleet.available[0].units == 1 && r.fleet.reserved[1] == 5)
+    // Simulation time alone never starts an unapproved launch.
+    for _ in 0..<60 { step(&r.game); step_transports(&r.fleet,&r.game,r.definitions[:]) }
+    testing.expect(t,r.fleet.missions[0].phase == .Awaiting_Approval && r.fleet.missions[0].loaded == 0)
+    testing.expect(t,!approve_transport(&r.fleet,r.fleet.missions[0].id+1))
+    testing.expect(t,approve_transport(&r.fleet,r.fleet.missions[0].id))
+    testing.expect(t,r.fleet.missions[0].phase == .Loading)
+    testing.expect(t,!approve_transport(&r.fleet,r.fleet.missions[0].id)) // Exactly once.
+    step(&r.game)
+    step_transports(&r.fleet,&r.game,r.definitions[:])
+    testing.expect(t,r.fleet.missions[0].phase == .Loading || r.fleet.missions[0].loaded > 0)
+}
+
+@(test)
+transport_pending_request_is_withdrawn_when_destination_disables :: proc(t: ^testing.T) {
+    r: Transport_Test
+    transport_test_init(&r)
+    defer transport_test_destroy(&r)
+    toggle(&r.game,{id="H"})
+    dispatch_transports(&r.fleet,&r.game,r.definitions[:])
+    testing.expect(t,r.fleet.missions[0].phase == .Awaiting_Approval && r.fleet.available[0].units == 1)
+    toggle(&r.game,{id="H"})
+    dispatch_transports(&r.fleet,&r.game,r.definitions[:])
+    testing.expect(t,r.fleet.missions[0].phase == .Cancelled && r.fleet.reserved[1] == 0)
+    testing.expect(t,r.fleet.stock[0].units == 10 && r.fleet.available[0].units == 2)
+    for subject in r.fleet.subjects { testing.expect(t,subject.activity != .Reserved) }
 }
 
 @(test)
@@ -101,10 +144,39 @@ transport_profiles_use_ship_ramp_hours :: proc(t: ^testing.T) {
     }
     mission := Transport{leg_distance=7200,max_speed=3600,max_speed_hours=2,duration=4,elapsed=1}
     distance, speed := transport_position(mission)
-    testing.expect(t,distance == 900 && speed == 1800)
+    // Non-linear S-curve: at half the 2-hour ramp the velocity reached is half
+    // the peak, but the eased distance is well below the old 0.5*a*t^2 (900).
+    testing.expect(t,distance == 675 && speed == 1800)
+    testing.expect(t,distance < 0.5*(3600.0/2.0)*1*1)
     mission.elapsed = 3
     distance, speed = transport_position(mission)
-    testing.expect(t,distance == 6300 && speed == 1800)
+    testing.expect(t,distance == 6525 && speed == 1800)
+    // The mirrored braking side is exactly symmetric about the midpoint.
+    _, last_speed := transport_position(Transport{leg_distance=7200,max_speed=3600,max_speed_hours=2,duration=4,elapsed=3})
+    testing.expect(t,675+distance == 7200 && last_speed == 1800)
+}
+
+@(test)
+ship_ramp_is_non_linear_with_soft_start_and_stop :: proc(t: ^testing.T) {
+    // Endpoints and shape integral are exact, so travel_duration stays valid.
+    testing.expect(t,ship_ramp_speed(0) == 0 && ship_ramp_speed(1) == 1 && ship_ramp_distance(0) == 0 && ship_ramp_distance(1) == 0.5)
+    testing.expect(t,ship_ramp_speed(0.5) == 0.5 && ship_ramp_distance(0.5) == 0.09375)
+    // Zero slope at both ends means acceleration and braking start/stop smoothly,
+    // unlike the former constant-acceleration profile.
+    testing.expect(t,ship_ramp_speed(0.01) < 0.01 && ship_ramp_speed(0.99) > 0.99)
+    testing.expect(t,ship_ramp_speed(0.5)-ship_ramp_speed(0.49) > ship_ramp_speed(0.01)-ship_ramp_speed(0))
+    previous_speed: f64
+    for step in 0..=1000 {
+        fraction := f64(step)/1000
+        speed := ship_ramp_speed(fraction)
+        testing.expect(t,speed >= previous_speed && speed >= 0 && speed <= 1)
+        testing.expect(t,abs(speed+ship_ramp_speed(1-fraction)-1) < 1e-12)
+        previous_speed = speed
+    }
+    // Smoothstep area identity: the ramp covers exactly half of peak-time distance.
+    sum: f64
+    for step in 0..<1000 { sum += ship_ramp_speed((f64(step)+0.5)/1000) }
+    testing.expect(t,abs(sum/1000-0.5) < 1e-6)
 }
 
 @(test)

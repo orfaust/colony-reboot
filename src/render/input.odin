@@ -14,6 +14,7 @@ Binding :: union { rl.KeyboardKey, rl.MouseButton, Wheel_Direction }
 Bindings :: struct {
     menu_up, menu_down, activate, back, select, zoom_in, zoom_out, pan: []Binding,
     speed_up, slow_down: []Binding,
+    overview_buildings, overview_subjects: []Binding,
 }
 
 // Names are "key:<raylib key>", "mouse:<raylib button>" or "wheel:<up|down>".
@@ -57,6 +58,8 @@ resolve_bindings :: proc(config: c.Key_Bindings, allocator: mem.Allocator) -> (b
         {"pan", config.pan, &bindings.pan, true},
         {"speed_up", config.speed_up, &bindings.speed_up, false},
         {"slow_down", config.slow_down, &bindings.slow_down, false},
+        {"overview_buildings", config.overview_buildings, &bindings.overview_buildings, false},
+        {"overview_subjects", config.overview_subjects, &bindings.overview_subjects, false},
     }
     for action in actions {
         codes := make([]Binding, len(action.inputs), allocator)
@@ -103,6 +106,7 @@ poll_input :: proc(bindings: Bindings, development: bool = false) -> c.Input {
         focused = rl.IsWindowFocused(),
         back = pressed(bindings.back, wheel),
         speed_up = pressed(bindings.speed_up, wheel), slow_down = pressed(bindings.slow_down, wheel),
+        toggle_buildings = pressed(bindings.overview_buildings, wheel), toggle_subjects = pressed(bindings.overview_subjects, wheel),
     }
     return reload_input(input,development,rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL),rl.IsKeyPressed(.R))
 }

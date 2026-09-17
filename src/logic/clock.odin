@@ -7,6 +7,8 @@ import c "../contracts"
 HOURS_PER_SECOND :: f64(1)
 // Fixed simulation step: one simulated minute, independent of the frame rate.
 TICKS_PER_HOUR :: 60
+// One fixed simulation step expressed in simulated hours.
+TICK_HOURS :: f64(1)/f64(TICKS_PER_HOUR)
 // Ordered speed levels in simulated hours per real second; index 0 is the default.
 SPEEDS :: [?]i64{1, 2, 4, 8, 16, 32}
 // Real time beyond this per advance (window drag, debugger, stall) is dropped

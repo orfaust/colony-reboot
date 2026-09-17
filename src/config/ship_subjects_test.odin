@@ -1,5 +1,6 @@
 package config
 
+import "core:fmt"
 import "core:mem"
 import "core:strings"
 import "core:testing"
@@ -50,4 +51,14 @@ ship_subject_capacities :: proc(t: ^testing.T) {
     zero_capacity, _ := strings.replace_all(source,"\"capacity\":100","\"capacity\":0",allocator)
     _, error = decode_ships(transmute([]byte)zero_capacity,subjects[:],texts,allocator)
     testing.expect(t,error == "",error)
+    // `emergency` is a validated ship type; unknown categories are rejected with a field path.
+    emergency, _ := strings.replace_all(source,"\"type\":\"transport\"","\"type\":\"emergency\"",allocator)
+    emergency_ships, emergency_error := decode_ships(transmute([]byte)emergency,subjects[:],texts,allocator)
+    testing.expect(t,emergency_error == "" && emergency_ships[0].type == "emergency",emergency_error)
+    for kind in ([?]string{`"unknown"`, `null`, `""`, `42`}) {
+        invalid, _ := strings.replace_all(source,"\"type\":\"transport\"",fmt.aprintf("\"type\":%s",kind,allocator=allocator),allocator)
+        _, invalid_error := decode_ships(transmute([]byte)invalid,subjects[:],texts,allocator)
+        testing.expect(t,invalid_error != "",kind)
+        testing.expect(t,strings.contains(invalid_error,".type"),invalid_error)
+    }
 }

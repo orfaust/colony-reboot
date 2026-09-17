@@ -1,7 +1,7 @@
 # Asset Manager
 
-Local web tool (Node + React) to visually edit the JSON files in `../assets`.
-It is a development tool only; the game never depends on it.
+Local web tool (Node + React) to visually edit the JSON configuration versions in
+`../assets/config`. It is a development tool only; the game never depends on it.
 
 ## Requirements
 
@@ -26,36 +26,55 @@ npm start          # http://127.0.0.1:5174 (override with PORT / HOST)
 Set `ASSETS_DIR` to edit a different assets directory. The server binds to
 localhost only and has no authentication: do not expose it on a network.
 
+## Configuration versions
+
+Every configuration version is one self-contained directory under
+`assets/config/<name>` (`default`, then whatever you add for experiments). Each
+version holds the same documents: `buildings.json`, `resources.json`,
+`subjects.json`, `subject_roles.json`, `ships.json`, `space_stations.json`,
+`key_bindings.json`, `levels/*.json` and `localization/en.json`. Sprites under
+`assets/sprites` stay shared.
+
+The **Version** selector in the top bar lists the available versions and scopes
+all editing to the selected one; versions are never merged, and switching reloads
+every document from the new directory. **+ New** duplicates the current version
+under a new name (validated as 1-64 letters, digits, `-` or `_`), and **Delete**
+removes a non-default version after confirmation. Unsaved changes block version
+switching, creation and deletion until they are saved or discarded.
+
+The game reads the same directories, so a version created here runs with
+`odin run src/app -- --config <name>` (or `-define:CONFIG_PROFILE=<name>`).
+
 ## Features
 
 Ship/subject sprite fields and dimensions currently store metadata only; they
-must not be confused with the existing role sprites or current ship draw sizes.
+must not be confused with the per-role subject sprites or current ship draw sizes.
 See [Ship and Subject Presentation Metadata](../docs/ship-subject-presentation.md).
 
 - **Files menu** in the top bar replaces the directory path and permanent sidebar.
-  It groups assets by folder, shows the active file, error counts and unsaved markers,
+  It groups the selected version's assets by folder, shows the active file, error counts and unsaved markers,
   and keeps the new-level action. It closes on selection, Escape, outside click or
   when keyboard focus leaves it; Escape and selection return focus to the trigger.
   Use Tab/Shift+Tab to navigate its buttons. The editor uses the full window width.
 
-- **config/buildings.json** — array of building types identified by `id`: code,
-  localization keys with live English preview, size preview (64 screen units per
-  world unit), RGB color picker, optional repository-relative PNG `sprite` path,
+- **buildings.json** — array of building types identified by `id`: code,
+  localization keys with live English preview, size preview in pixels, RGB color picker, optional repository-relative PNG `sprite` path,
   power values, always on, warm-up/cooldown, operative health,
   materials, staffing (`subject_roles`: a three-column table showing localized role
-  name, editable quantity and Required checkbox). Every role from the role catalog
+  name, an editable whole-number quantity and a staffing-mode select). Every role from the role catalog
   has a row, in catalog order. Missing assignments display zero quantity and the
-  standard required default (false for repairer); only editing a cell creates that
+  standard mode default (on demand for repairer, continuous otherwise); only editing a cell creates that
   assignment. Rendering never changes the JSON. Duplicate assignments are blocked;
   unknown/malformed rows remain preserved for repair in the JSON tab. Unknown fields,
   validation and normal undo/history are preserved. This compact staffing matrix is
   an intentional exception to the default master-detail list convention. Also includes residents (subject type and capacity), needs/produces/storage (with capacities) with pickers fed by
-  `config/resources.json`. Renaming an `id` offers to update `building_id` in levels.
-- **config/resources.json** — array of resources identified by `id`, with the list
+  `resources.json`. Renaming an `id` offers to update `building_id` in levels.
+- **resources.json** — array of resources identified by `id`, with the list
   of building types using each one. Renaming an `id` offers to update the
   `resource_id` references in `buildings.json` and `subjects.json`.
-- **config/subject_roles.json** — metadata for `worker`, `supervisor`, `repairer`:
-  ID, localization name key, RGB color and sprite path. All three are required once;
+- **subject_roles.json** — identity metadata for `worker`, `supervisor`,
+  `repairer`: ID and localization name key, with no color or sprite. All three are
+  required once;
   a left-hand selectable list and right-hand selected-role properties, using the
   shared responsive master-detail layout. The form restores and selects missing
   roles, supports confirmed removal and preserves selection while reordering.
@@ -63,32 +82,41 @@ See [Ship and Subject Presentation Metadata](../docs/ship-subject-presentation.m
   through the JSON tab. Role
   pickers in subject types and levels use the localized catalog names, saving IDs.
   Role/building sprite fields validate normalized `assets/.../*.png` paths only:
-  no browser preview, upload, file creation or existence check. New entries use
-  empty paths to preserve color rendering. Run `python tools/build.py` at the
+  no upload, file creation or existence check. **Browse…** lists PNGs already under
+  `assets/`; choosing one only sets the path after confirmation. When a path is set,
+  a read-only preview is shown from the `GET /api/image` endpoint, which serves PNGs
+  inside `assets/` and refuses traversal or other extensions. A missing or unreadable
+  file shows an inline message and never blocks editing or saving. Previews use
+  nearest-neighbor rendering to match pixel art. Run `python tools/build.py` at the
   repository root for required pre-compilation file and PNG checks. See
   [Role Metadata and Sprite Paths](../docs/roles-and-sprites.md).
-- **config/subjects.json** — array of subject types identified by `id`: name key, color, optional `sprite` path, required positive world-unit `width`/`height` (new types: 1×1), and
-  hourly needs (`amount_per_hour`, `shortage_alert_time`, `shortage_max_time`), rest/work hours, roles (`{role_id, sprite}` objects in a responsive nested master-detail editor;
-  none is saved as `null`). The role list shows localized names, catalog colors and
-  inherited/override sprite status. Choose an unused role before adding; new entries
+- **subjects.json** — array of subject types identified by `id`: name key, color, optional `sprite` path, required positive pixel `width`/`height` (new types: 64×64), and
+  hourly needs (`amount_per_hour`, `shortage_alert_time`, `shortage_max_time`,
+  `satisfied_health_gain_per_hour`, `max_shortage_health_loss_per_hour`; at most
+  `SUBJECT_NEED_LIMIT` (8) per type, matching the runtime's fixed per-subject need
+  arrays), rest/work/overtime
+  hours (`rest_time`, `work_time`, `extra_work_time`), health thresholds
+  (`min_work_health`, `min_colony_health`) and the `health_rates` object, roles (`{role_id, sprite}` objects in a responsive nested master-detail editor;
+  none is saved as `null`). The role list shows localized names and subject
+  sprite inheritance. Choose an unused role before adding; new entries
   are selected. Row ordering controls preserve selection even when a neighbor moves.
-  The selected detail has duplicate/invalid-ID diagnostics, a sprite path with Browse,
-  and the catalog fallback path. Removal and resetting malformed data require
+  The selected detail has duplicate/invalid-ID diagnostics, a sprite override path
+  with Browse, and the inherited subject sprite. Removal and resetting malformed data require
   confirmation; legacy entries remain explicitly repairable and unknown fields are
   preserved, and produces (resource and units per hour). Renaming an `id` offers to update `subject_id` in levels and `residents.type` in buildings.
-- **config/key_bindings.json** — searchable actions grouped into menu, camera/world
+- **key_bindings.json** — searchable actions grouped into menu, camera/world
   and simulation controls. Compact rows separate device and input selection, show
   customized actions and inline errors, and support add/remove/reorder plus confirmed
   per-action or global reset. Pickers exclude duplicates within an action and wheel
   inputs for pan; the last input cannot be removed. Existing malformed data remains
   visible for repair. Validation rejects unknown inputs, empty actions and duplicates.
-- **config/ships.json** — left-hand list and right-hand properties, with predefined ID, code and RGB color (picker and numeric channels), localization name key, free-form type, optional `sprite` path, positive world-unit
-  `width`/`height` (new ships: 1×1), maximum speed (`max_speed`, km/h), acceleration/braking duration (`max_speed_hours`, hours), cargo throughput (`units_per_hour`, units loaded/unloaded per simulated hour; zero prevents dispatch), and
+- **ships.json** — left-hand list and right-hand properties, with predefined ID, code and RGB color (picker and numeric channels), localization name key, validated type (`transport` or `emergency`), optional `sprite` path, positive pixel
+  `width`/`height` (new ships: 64×64), maximum speed (`max_speed`, km/h), acceleration/braking duration (`max_speed_hours`, hours), cargo throughput (`units_per_hour`, units loaded/unloaded per simulated hour; zero prevents dispatch), and
   subject capacities (`subject_id`, `capacity`) with subject-catalog pickers.
   New ships start with a unique ID, transport type, and empty `subjects`; adding a
   subject row uses capacity 100. References, duplicates, and capacities are validated. Duplicate/delete/reorder
   controls are available; new name keys must be added to English localization.
-- **config/space_stations.json** — array with a left-hand list and right-hand properties,
+- **space_stations.json** — array with a left-hand list and right-hand properties,
   unique station IDs, display codes, name keys and resource/subject/ship stock lists.
   Ship and station lists show the code instead of the ID; ships also show a color swatch. New, duplicate,
   delete and reorder work like the other catalogs; an empty list is allowed. This
@@ -116,8 +144,8 @@ See [Ship and Subject Presentation Metadata](../docs/ship-subject-presentation.m
   drag the background to pan. Arrow keys nudge and Del removes only while the map
   has keyboard focus, never while navigating menus or editing another panel.
   Deletion asks for confirmation; occupied residences must be reassigned first,
-  while deleted workplaces clear subject occupations. Committed building ID renames
-  update residence/occupation references in the same undoable edit. Reordering
+  while deleted workplaces clear subject initial assignments. Committed building ID renames
+  update residence and initial-assignment references in the same undoable edit. Reordering
   preserves selection even when moving a neighboring entry. Inspector for
   ID, `building_id`, position, health, repairing, `enable_at_start` (forced on for always_on types), `residents_amount` (only for types with residents), and `stored` (one amount per resource the type
   needs, produces, or stores, up to its capacity; “Sync stored” realigns stored and residents_amount after the type's needs, products, storage, or residents change); list reordering changes draw
@@ -142,8 +170,10 @@ See [Ship and Subject Presentation Metadata](../docs/ship-subject-presentation.m
 
 Open **Files**, select an asset, and verify its editor opens and the menu closes.
 Check unsaved/error markers, the new-level action, Escape, outside clicks and
-Tab/Shift+Tab focus. Resize below 720px: the trigger moves to its own header row
-and the scrollable popup should remain inside the viewport.
+Tab/Shift+Tab focus. Switch the **Version** selector and verify the file list
+reloads for the new version; use **+ New** and **Delete** to manage a test
+version. Resize below 720px: the version selector and the file trigger move to
+their own header rows and the scrollable popup should remain inside the viewport.
 
 Building/subject product and level station stock `units_per_hour` inputs
 shows a read-only **Hours per unit** preview below it: `1 / units_per_hour`, up to

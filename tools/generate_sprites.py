@@ -16,6 +16,8 @@ def png_bytes(width, height, pixels):
 
 
 def original_sprite(color, role=False):
+    """Original 32x32 placeholder. `role=True` drew the retained role placeholders;
+    the catalogs no longer carry role colors, so main() no longer drives that variant."""
     size = 32
     pixels = bytearray(size * size * 4)
     base = (*color, 255)
@@ -45,20 +47,24 @@ def original_sprite(color, role=False):
 
 
 def main():
-    # Only the documented original placeholders may be overwritten, never arbitrary configured art.
-    for source, folder, role in [('buildings.json', 'buildings', False), ('subject_roles.json', 'roles', True)]:
-        for definition in json.loads((ROOT / 'assets/config' / source).read_text(encoding='utf-8')):
-            identifier = definition['id']
-            if not isinstance(identifier, str) or not identifier or any(c in identifier for c in '/\\\\:\x00') or identifier in ('.', '..'):
-                raise ValueError('placeholder IDs must be single safe filename components')
-            expected = f'assets/sprites/{folder}/{identifier}.png'
-            if definition.get('sprite') != expected:
-                continue
-            path = ROOT / expected
-            path.parent.mkdir(parents=True, exist_ok=True)
-            color = definition['color']
-            path.write_bytes(original_sprite((color['r'], color['g'], color['b']), role))
-            print(expected)
+    # Only the documented original building placeholders may be overwritten, never
+    # arbitrary configured art. Role catalogs carry no color or sprite, so the
+    # `role=True` variant stays available but is no longer regenerated here.
+    # Placeholder art is generated from the default profile; other profiles are test
+    # variations and must not silently rewrite shared sprites.
+    catalog = ROOT / 'assets/config/default/buildings.json'
+    for definition in json.loads(catalog.read_text(encoding='utf-8')):
+        identifier = definition['id']
+        if not isinstance(identifier, str) or not identifier or any(c in identifier for c in '/\\:\x00') or identifier in ('.', '..'):
+            raise ValueError('placeholder IDs must be single safe filename components')
+        expected = f'assets/sprites/buildings/{identifier}.png'
+        if definition.get('sprite') != expected:
+            continue
+        path = ROOT / expected
+        path.parent.mkdir(parents=True, exist_ok=True)
+        color = definition['color']
+        path.write_bytes(original_sprite((color['r'], color['g'], color['b'])))
+        print(expected)
 
 
 if __name__ == '__main__':

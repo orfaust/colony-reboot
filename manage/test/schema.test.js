@@ -3,10 +3,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BUILDINGS_PATH, CONTROL_UNIT_ID, POWER_FORMAT_KEYS, RESOURCES_PATH, SUBJECTS_PATH, SHIPS_PATH, STATIONS_PATH, TEXTS_PATH, validateDoc } from '../src/lib/schema.js';
+import { BUILDINGS_PATH, CONTROL_UNIT_ID, POWER_FORMAT_KEYS, RESOURCES_PATH, SUBJECTS_PATH, SHIPS_PATH, STATIONS_PATH, SUBJECT_NEED_LIMIT, TEXTS_PATH, validateDoc } from '../src/lib/schema.js';
 
 const LEVEL_PATH = 'levels/level_0.json';
-const assetsDir = new URL('../../assets/', import.meta.url);
+// Documents are edited inside one configuration version: assets/config/<version>/.
+const assetsDir = new URL('../../assets/config/default/', import.meta.url);
 const shipped = Object.fromEntries(
   [TEXTS_PATH, RESOURCES_PATH, BUILDINGS_PATH, SUBJECTS_PATH, SHIPS_PATH, STATIONS_PATH, LEVEL_PATH].map((path) => [path, JSON.parse(readFileSync(new URL(path, assetsDir), 'utf8'))]),
 );
@@ -53,20 +54,52 @@ test('localization: the clock format needs {hours} and {speed}', () => {
   }
 });
 
-test('level: Control Unit demand above its output is rejected', () => {
+test('level: initial power demand above the enabled output is rejected', () => {
   const docs = loadDocs();
-  assert.ok(docs[LEVEL_PATH].data.buildings.some((b) => b.building_id === CONTROL_UNIT_ID), 'level 0 places a Control Unit');
-  const controlUnit = docs[BUILDINGS_PATH].data.find((t) => t.id === CONTROL_UNIT_ID);
-  // Independent of the shipped level: only Control Units start active here.
-  for (const b of docs[LEVEL_PATH].data.buildings) if (b.building_id !== CONTROL_UNIT_ID) b.enable_at_start = false;
+  const instances = docs[LEVEL_PATH].data.buildings;
+  const types = docs[BUILDINGS_PATH].data;
+  assert.ok(instances.some((b) => b.building_id === CONTROL_UNIT_ID), 'level 0 places a Control Unit');
+  // Independent of the shipped level: no building starts active unless this test asks.
+  for (const b of instances) if (b.building_id !== CONTROL_UNIT_ID) b.enable_at_start = false;
+  // Power roles are mutually exclusive, so the fixture uses one generator type and
+  // one consumer type instead of a mixed Control Unit.
+  for (const type of types) if (type.id !== CONTROL_UNIT_ID) type.always_on = false;
+  const generator = instances.find((b) => b.building_id !== CONTROL_UNIT_ID);
+  const consumer = instances.find((b) => b.building_id !== CONTROL_UNIT_ID && b.building_id !== generator.building_id);
+  const typeOf = (instance) => types.find((t) => t.id === instance.building_id);
+  Object.assign(typeOf(generator), { power_output_kw: 1000, power_need_kw: 0, min_operative_health: 0 });
+  Object.assign(typeOf(consumer), { power_output_kw: 0, power_need_kw: 1000.00005, min_operative_health: 0 });
+  Object.assign(generator, { enable_at_start: true, health: 1 });
+  Object.assign(consumer, { enable_at_start: true, health: 1 });
+  assert.deepEqual(errors(docs, LEVEL_PATH), [], 'differences within f32 rounding are tolerated');
 
-  controlUnit.power_output_kw = 0;
-  controlUnit.power_need_kw = 0.001;
-  assert.ok(hasError(docs, LEVEL_PATH, '$.buildings'), 'positive demand with zero output');
+  Object.assign(typeOf(consumer), { power_need_kw: 1000.001 });
+  assert.ok(hasError(docs, LEVEL_PATH, '$.buildings'), 'a real deficit is rejected');
+});
 
-  controlUnit.power_output_kw = 1000;
-  controlUnit.power_need_kw = 1000.00005;
-  assert.ok(!hasError(docs, LEVEL_PATH, '$.buildings'), 'differences within f32 rounding are tolerated');
+test('buildings: power roles are mutually exclusive and always_on must not consume', () => {
+  const docs = loadDocs();
+  const building = docs[BUILDINGS_PATH].data[0];
+  Object.assign(building, { power_output_kw: 5, power_need_kw: 3 });
+  assert.ok(hasError(docs, BUILDINGS_PATH, '$[0]'), 'a mixed producer/consumer is rejected');
+  Object.assign(building, { power_output_kw: 0, power_need_kw: 3 });
+  assert.ok(hasError(docs, BUILDINGS_PATH, '$[0].power_need_kw'), 'always_on with positive demand is rejected');
+  Object.assign(building, { always_on: false, power_need_kw: 0 });
+  assert.deepEqual(errors(docs, BUILDINGS_PATH), [], 'a pure consumer with zero demand is valid');
+});
+
+test('buildings: amount_per_unit needs require a reference product', () => {
+  const docs = loadDocs();
+  const resourceId = docs[RESOURCES_PATH].data[0].id;
+  const [, consumer] = docs[BUILDINGS_PATH].data;
+  consumer.always_on = false;
+  consumer.needs = [{ resource_id: resourceId, amount_per_unit: 2, capacity: 10 }];
+  consumer.produces = [{ resource_id: resourceId, units_per_hour: 5, capacity: 10 }];
+  assert.deepEqual(errors(docs, BUILDINGS_PATH), [], 'the first product is the reference ratio');
+  consumer.produces = [];
+  assert.ok(hasError(docs, BUILDINGS_PATH, '$[1].needs[0]'), 'a per-unit need without a reference product is rejected');
+  consumer.produces = [{ resource_id: resourceId, units_per_hour: 0, capacity: 10 }];
+  assert.ok(hasError(docs, BUILDINGS_PATH, '$[1].needs[0]'), 'a first product without a positive rate cannot be the reference ratio');
 });
 
 test('buildings: positive values that round to zero as f32 are rejected', () => {
@@ -91,7 +124,12 @@ test('buildings: operative health, materials, staffing and product storage range
     return errors(docs, BUILDINGS_PATH).length > 0;
   };
   const product = { resource_id, units_per_hour: 1, capacity: 10 };
-  assert.ok(!buildingErrors({ min_operative_health: 1, materials_amount: 25, subject_roles: [{ role_id: 'supervisor', quantity: 1, required: true }, { role_id: 'worker', quantity: 2.5, required: true }], produces: [product] }), 'valid');
+  assert.ok(!buildingErrors({ min_operative_health: 1, materials_amount: 25, subject_roles: [{ role_id: 'supervisor', quantity: 1, staffing_mode: 'continuous' }, { role_id: 'worker', quantity: 2, staffing_mode: 'on_demand' }], produces: [product] }), 'valid');
+  assert.ok(buildingErrors({ subject_roles: [{ role_id: 'worker', quantity: 1.5, staffing_mode: 'continuous' }] }), 'fractional slot quantity');
+  assert.ok(buildingErrors({ subject_roles: [{ role_id: 'worker', quantity: -1, staffing_mode: 'continuous' }] }), 'negative slot quantity');
+  assert.ok(buildingErrors({ subject_roles: [{ role_id: 'worker', quantity: 1, staffing_mode: 'sometimes' }] }), 'unknown staffing_mode');
+  assert.ok(buildingErrors({ subject_roles: [{ role_id: 'worker', quantity: 1 }] }), 'missing staffing_mode');
+  assert.ok(buildingErrors({ subject_roles: [{ role_id: 'worker', quantity: 1, required: true }] }), 'legacy required field');
   assert.ok(buildingErrors({ min_operative_health: 1.5 }), 'health above 1');
   assert.ok(buildingErrors({ min_operative_health: -0.1 }), 'negative health');
   assert.ok(!buildingErrors({ always_on: true }), 'always_on true');
@@ -108,10 +146,10 @@ test('buildings: operative health, materials, staffing and product storage range
   const { capacity: _capacity, ...withoutCapacity } = product;
   assert.ok(buildingErrors({ produces: [withoutCapacity] }), 'missing capacity');
   const need = { resource_id, amount_per_unit: 1, capacity: 5 };
-  assert.ok(!buildingErrors({ needs: [need] }), 'need with capacity');
-  assert.ok(buildingErrors({ needs: [{ ...need, capacity: -1 }] }), 'negative need capacity');
+  assert.ok(!buildingErrors({ needs: [need], produces: [product] }), 'need with capacity');
+  assert.ok(buildingErrors({ needs: [{ ...need, capacity: -1 }], produces: [product] }), 'negative need capacity');
   const { capacity: _needCapacity, ...needWithoutCapacity } = need;
-  assert.ok(buildingErrors({ needs: [needWithoutCapacity] }), 'missing need capacity');
+  assert.ok(buildingErrors({ needs: [needWithoutCapacity], produces: [product] }), 'missing need capacity');
   const subjectId = shipped[SUBJECTS_PATH][0].id;
   const residents = { type: subjectId, capacity: 4 };
   assert.ok(!buildingErrors({ residents }), 'valid residents');
@@ -123,14 +161,10 @@ test('buildings: operative health, materials, staffing and product storage range
   assert.ok(buildingErrors({ residents: [subjectId] }), 'residents not an object');
   assert.ok(buildingErrors({}, 'residents'), 'missing residents');
   assert.ok(buildingErrors({ residents, host_type: [subjectId] }), 'legacy host_type field');
-  const residentNeed = { resource_id, amount_per_resident: 0.08, capacity: 10 };
-  assert.ok(!buildingErrors({ residents, needs: [residentNeed] }), 'per-resident need with residents');
-  assert.ok(buildingErrors({ residents: null, needs: [residentNeed] }), 'per-resident need without residents');
-  const residentProduct = { resource_id, amount_per_resident: 0.25, capacity: 10 };
-  assert.ok(!buildingErrors({ residents, produces: [residentProduct] }), 'per-resident product with residents');
-  assert.ok(buildingErrors({ residents: null, produces: [residentProduct] }), 'per-resident product without residents');
-  assert.ok(buildingErrors({ residents, produces: [{ ...residentProduct, amount_per_resident: 0 }] }), 'zero per-resident product');
-  assert.ok(buildingErrors({ residents, produces: [{ ...residentProduct, units_per_hour: 1 }] }), 'units_per_hour and amount_per_resident');
+  // The obsolete per-resident building rates are removed from the schema and rejected
+  // as unknown fields on both needs and products.
+  assert.ok(buildingErrors({ residents, needs: [{ resource_id, amount_per_resident: 0.08, capacity: 10 }] }), 'amount_per_resident need is rejected');
+  assert.ok(buildingErrors({ residents, produces: [{ resource_id, amount_per_resident: 0.25, capacity: 10 }] }), 'amount_per_resident product is rejected');
   assert.ok(buildingErrors({ produces: [{ resource_id, time_per_unit: 1, capacity: 10 }] }), 'legacy time_per_unit on a building product');
   assert.ok(buildingErrors({ produces: [{ ...product, units_per_hour: 0 }] }), 'zero units_per_hour');
   assert.ok(buildingErrors({ residents, produces: [{ resource_id, capacity: 10 }] }), 'product without a rate');
@@ -181,24 +215,23 @@ test('buildings: warmup_time and cooldown_time are required nonnegative hours', 
   }
 });
 
-test('buildings: needs take exactly one of amount_per_unit, amount_per_hour, or amount_per_resident', () => {
+test('buildings: needs take exactly one of amount_per_unit or amount_per_hour', () => {
   const docs = loadDocs();
   const [building] = docs[BUILDINGS_PATH].data;
   const resource_id = docs[RESOURCES_PATH].data[0].id;
-  const needErrors = (need) => {
+  const reference = { resource_id, units_per_hour: 5, capacity: 10 };
+  const needErrors = (need, produces = [reference]) => {
     building.needs = [need];
+    building.produces = produces;
     return hasError(docs, BUILDINGS_PATH, '$[0].needs[0]');
   };
   assert.ok(!needErrors({ resource_id, amount_per_hour: 4 }), 'hourly amount is valid');
   assert.ok(!needErrors({ resource_id, amount_per_unit: 2 }), 'per-unit amount is valid');
-  building.residents = { type: docs[SUBJECTS_PATH].data[0].id, capacity: 1 }; // amount_per_resident requires residents
-  assert.ok(!needErrors({ resource_id, amount_per_resident: 0.08 }), 'per-resident amount is valid');
   assert.ok(needErrors({ resource_id }), 'neither amount');
   assert.ok(needErrors({ resource_id, amount_per_unit: 2, amount_per_hour: 4 }), 'both amounts');
   assert.ok(needErrors({ resource_id, amount_per_hour: 0 }), 'zero hourly amount');
-  assert.ok(needErrors({ resource_id, amount_per_resident: 0 }), 'zero per-resident amount');
+  assert.ok(needErrors({ resource_id, amount_per_resident: 0.08 }), 'the removed per-resident amount is rejected');
   assert.ok(needErrors({ resource_id, amount_per_hour: 4, amount_per_resident: 1 }), 'hourly and per-resident amounts');
-  assert.ok(needErrors({ resource_id, amount_per_unit: 2, amount_per_resident: 1 }), 'per-unit and per-resident amounts');
 });
 
 test('subjects: types need a localized name and hourly needs on known resources', () => {
@@ -213,8 +246,12 @@ test('subjects: types need a localized name and hourly needs on known resources'
     color: { r: 1, g: 2, b: 3 },
     rest_time: 8,
     work_time: 10,
+    extra_work_time: 2,
+    min_work_health: 0.4,
+    min_colony_health: 0.1,
+    health_rates: { work_gain_per_hour: 0.002, rest_gain_per_hour: 0.01, extra_work_loss_per_hour: 0.025, max_inactivity_loss_per_hour: 0.012, inactivity_max_time: 72, station_recovery_per_hour: 0.04 },
     roles: [{ role_id: 'worker', sprite: '' }, { role_id: 'repairer', sprite: '' }],
-    needs: [{ resource_id, amount_per_hour: 0.5, shortage_alert_time: 12, shortage_max_time: 6 }],
+    needs: [{ resource_id, amount_per_hour: 0.5, shortage_alert_time: 12, shortage_max_time: 6, satisfied_health_gain_per_hour: 0.001, max_shortage_health_loss_per_hour: 0.02 }],
     produces: [product],
   };
   const subjectErrors = (patch) => {
@@ -227,7 +264,7 @@ test('subjects: types need a localized name and hourly needs on known resources'
   assert.ok(subjectErrors({ color: undefined }), 'missing color');
   assert.ok(subjectErrors({ needs: [{ resource_id, amount_per_hour: 0 }] }), 'zero amount');
   assert.ok(subjectErrors({ needs: [{ resource_id, amount_per_unit: 1 }] }), 'per-unit amount');
-  const need = { resource_id, amount_per_hour: 1, shortage_alert_time: 0, shortage_max_time: 0 };
+  const need = { resource_id, amount_per_hour: 1, shortage_alert_time: 0, shortage_max_time: 0, satisfied_health_gain_per_hour: 0.001, max_shortage_health_loss_per_hour: 0.02 };
   assert.ok(subjectErrors({ needs: [{ ...need, resource_id: 'unknown' }] }), 'unknown resource');
   assert.ok(!subjectErrors({ needs: [need] }), 'zero alert and shortage time');
   assert.ok(subjectErrors({ needs: [{ ...need, shortage_alert_time: -1 }] }), 'negative shortage_alert_time');
@@ -245,6 +282,38 @@ test('subjects: types need a localized name and hourly needs on known resources'
   assert.ok(subjectErrors({ needs: [{ ...need, starving_max_time: 0 }] }), 'legacy field alongside new field');
   for (const shortage_max_time of [null, '1', Infinity, 1e100])
     assert.ok(subjectErrors({ needs: [{ ...need, shortage_max_time }] }), 'invalid shortage_max_time');
+  // Per-need health rates must be present, finite and nonnegative.
+  assert.ok(subjectErrors({ needs: [{ ...need, satisfied_health_gain_per_hour: -1 }] }), 'negative satisfied gain');
+  assert.ok(subjectErrors({ needs: [{ ...need, max_shortage_health_loss_per_hour: -1 }] }), 'negative shortage loss');
+  for (const field of ['satisfied_health_gain_per_hour', 'max_shortage_health_loss_per_hour']) {
+    const { [field]: _removed, ...withoutRate } = need;
+    assert.ok(subjectErrors({ needs: [withoutRate] }), `missing ${field}`);
+    assert.ok(subjectErrors({ needs: [{ ...need, [field]: null }] }), `null ${field}`);
+    assert.ok(subjectErrors({ needs: [{ ...need, [field]: Infinity }] }), `infinite ${field}`);
+    assert.ok(subjectErrors({ needs: [{ ...need, [field]: 1e100 }] }), `f32 overflow ${field}`);
+  }
+  // Runtime need state uses fixed per-subject arrays; the editor matches the loader limit.
+  assert.ok(!subjectErrors({ needs: Array.from({ length: SUBJECT_NEED_LIMIT }, () => need) }), 'needs at the supported limit');
+  assert.ok(subjectErrors({ needs: Array.from({ length: SUBJECT_NEED_LIMIT + 1 }, () => need) }), 'needs above the supported limit');
+  // Health thresholds and rates are required and range-checked.
+  assert.ok(subjectErrors({ extra_work_time: -1 }), 'negative extra_work_time');
+  assert.ok(subjectErrors({ extra_work_time: undefined }), 'missing extra_work_time');
+  assert.ok(subjectErrors({ extra_work_time: Infinity }), 'infinite extra_work_time');
+  assert.ok(subjectErrors({ min_work_health: 1.5 }), 'min_work_health above 1');
+  assert.ok(subjectErrors({ min_colony_health: -0.1 }), 'negative min_colony_health');
+  assert.ok(subjectErrors({ min_colony_health: 0.4 }), 'min_colony_health not below min_work_health');
+  assert.ok(subjectErrors({ min_work_health: 0.05 }), 'min_work_health below min_colony_health');
+  assert.ok(subjectErrors({ min_work_health: undefined }), 'missing min_work_health');
+  assert.ok(subjectErrors({ min_colony_health: undefined }), 'missing min_colony_health');
+  for (const field of ['work_gain_per_hour', 'rest_gain_per_hour', 'extra_work_loss_per_hour', 'max_inactivity_loss_per_hour', 'station_recovery_per_hour']) {
+    assert.ok(subjectErrors({ health_rates: { ...subject.health_rates, [field]: -1 } }), `negative ${field}`);
+    assert.ok(subjectErrors({ health_rates: { ...subject.health_rates, [field]: Infinity } }), `infinite ${field}`);
+    const { [field]: _removed, ...withoutRate } = subject.health_rates;
+    assert.ok(subjectErrors({ health_rates: withoutRate }), `missing ${field}`);
+  }
+  assert.ok(subjectErrors({ health_rates: { ...subject.health_rates, inactivity_max_time: -1 } }), 'negative inactivity_max_time');
+  assert.ok(subjectErrors({ health_rates: undefined }), 'missing health_rates');
+  assert.ok(subjectErrors({ health_rates: null }), 'null health_rates');
   assert.ok(subjectErrors({ rest_time: -1 }), 'negative rest_time');
   assert.ok(subjectErrors({ work_time: -1 }), 'negative work_time');
   assert.ok(subjectErrors({ rest_time: undefined }), 'missing rest_time');
@@ -272,18 +341,30 @@ test('level: subjects reference their type and building instances of the level',
   const [residence, workplace] = docs[LEVEL_PATH].data.buildings.map((b) => b.id);
   const residenceType = docs[BUILDINGS_PATH].data.find((t) => t.id === docs[LEVEL_PATH].data.buildings[0].building_id);
   residenceType.residents = { type: 'human', capacity: 1 };
+  residenceType.subject_roles = [{ role_id: 'worker', quantity: 1, staffing_mode: 'continuous' }];
   docs[LEVEL_PATH].data.buildings[0].residents_amount = 0; // a type with residents needs a number
-  const base = { id: 'H1', subject_id: 'human', residence, occupation: workplace, roles: ['worker', 'supervisor'], speed: 1 };
+  const base = { id: 'H1', subject_id: 'human', residence, health: 1, initial_assignment: { building_id: residence, role_id: 'worker' }, roles: ['worker', 'supervisor'], speed: 1 };
   const subjectErrors = (patch) => {
     docs[LEVEL_PATH].data.subjects = [{ ...base, ...patch }];
     return errors(docs, LEVEL_PATH).length > 0;
   };
   assert.ok(!subjectErrors({}), 'valid subject');
-  assert.ok(!subjectErrors({ occupation: null, roles: ['repairer'], speed: 0.5 }), 'unemployed repairer');
+  assert.ok(!subjectErrors({ initial_assignment: null, roles: ['repairer'], speed: 0.5, health: 0.5 }), 'unemployed repairer');
   assert.ok(subjectErrors({ subject_id: 'robot' }), 'unknown subject type');
   assert.ok(subjectErrors({ residence: 'missing' }), 'unknown residence');
   assert.ok(subjectErrors({ residence: null }), 'null residence');
-  assert.ok(subjectErrors({ occupation: 'missing' }), 'unknown occupation');
+  assert.ok(subjectErrors({ health: -0.1 }), 'negative health');
+  assert.ok(subjectErrors({ health: 1.1 }), 'health above 1');
+  assert.ok(subjectErrors({ health: undefined }), 'missing health');
+  assert.ok(subjectErrors({ health: null }), 'null health');
+  // initial_assignment replaces occupation; it references a continuous slot the subject can perform.
+  assert.ok(subjectErrors({ occupation: workplace }), 'legacy occupation field');
+  assert.ok(subjectErrors({ initial_assignment: { building_id: 'missing', role_id: 'worker' } }), 'unknown assignment building');
+  assert.ok(subjectErrors({ initial_assignment: { building_id: residence, role_id: 'repairer' } }), 'role not supported by the subject');
+  assert.ok(subjectErrors({ initial_assignment: { building_id: workplace, role_id: 'worker' } }), 'building without a continuous slot');
+  assert.ok(subjectErrors({ initial_assignment: { building_id: residence, role_id: 'worker', extra: 1 } }), 'unknown assignment field');
+  assert.ok(subjectErrors({ initial_assignment: undefined }), 'missing initial_assignment');
+  assert.ok(!subjectErrors({ initial_assignment: null }), 'null initial_assignment is unassigned');
   assert.ok(subjectErrors({ roles: ['farmer'] }), 'unknown role');
   assert.ok(subjectErrors({ roles: [] }), 'no roles');
   assert.ok(subjectErrors({ roles: ['worker', 'worker'] }), 'duplicate role');
@@ -291,12 +372,12 @@ test('level: subjects reference their type and building instances of the level',
   assert.ok(subjectErrors({ roles: undefined, role: 'worker' }), 'legacy role field');
   humanType.roles = ['worker', 'repairer'].map((role_id) => ({ role_id, sprite: '' }));
   assert.ok(subjectErrors({}), 'supervisor is not a role of the type');
-  assert.ok(!subjectErrors({ roles: ['repairer'] }), 'a role of the type');
+  assert.ok(!subjectErrors({ roles: ['repairer'], initial_assignment: null }), 'a role of the type');
   humanType.roles = null;
   assert.ok(subjectErrors({ roles: ['repairer'] }), 'a type with null roles takes none');
-  assert.ok(!subjectErrors({ roles: [] }), 'no roles for a type without roles');
+  assert.ok(!subjectErrors({ roles: [], initial_assignment: null }), 'no roles for a type without roles');
   humanType.roles = [];
-  assert.ok(!subjectErrors({ roles: [] }), 'empty type roles behave like null');
+  assert.ok(!subjectErrors({ roles: [], initial_assignment: null }), 'empty type roles behave like null');
   humanType.roles = ['worker', 'supervisor', 'repairer'].map((role_id) => ({ role_id, sprite: '' }));
   assert.ok(subjectErrors({ speed: 0 }), 'zero speed');
   const { speed: _speed, ...withoutSpeed } = base;

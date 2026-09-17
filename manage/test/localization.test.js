@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { EXTRA_FORMAT_TOKENS, REQUIRED_TEXT_KEYS, collectTextReferences, validateLocalization } from '../src/lib/schema.js';
 
-const texts = JSON.parse(readFileSync(new URL('../../assets/localization/en.json', import.meta.url), 'utf8'));
+const texts = JSON.parse(readFileSync(new URL('../../assets/config/default/localization/en.json', import.meta.url), 'utf8'));
 test('every mandatory text is validated and protected as a game-code reference', () => {
   assert.deepEqual(validateLocalization(texts), []);
   const references = collectTextReferences({});

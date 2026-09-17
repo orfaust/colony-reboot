@@ -46,29 +46,33 @@ activation_and_power_guards :: proc(t: ^testing.T) {
 }
 
 @(test)
-combined_producer_consumer_and_exact_capacity :: proc(t: ^testing.T) {
+exact_capacity_start_and_initial_balance :: proc(t: ^testing.T) {
+    // Power attributes are mutually exclusive: producers and consumers are separate
+    // types, so a load starts only from external generation.
     definitions := [?]Building_Type{
-        {id="control_unit",power_need_kw=1,power_output_kw=1},
-        {id="combined",power_output_kw=5,power_need_kw=3},
-        {id="consumer",power_need_kw=2},
+        {id="control_unit",power_output_kw=1},
+        {id="generator",power_output_kw=2},
+        {id="consumer",power_need_kw=3},
     }
     initial := [?]Building_Instance{
         {id="CU1",building_id="control_unit",health=1},
-        {id="P1",building_id="combined",health=1}, {id="C1",building_id="consumer",health=1},
+        {id="G1",building_id="generator",health=1}, {id="C1",building_id="consumer",health=1},
     }
     state := new_session(initial[:], definitions[:], context.allocator)
     defer destroy(&state, context.allocator)
-    testing.expect(t, toggle(&state, {id="P1"}) == .Applied)
-    testing.expect(t, balance(&state).available_kw == 2)
+    testing.expect(t, toggle(&state, {id="C1"}) == .Insufficient_Power)
+    testing.expect(t, toggle(&state, {id="G1"}) == .Applied)
+    testing.expect(t, balance(&state).available_kw == 3)
+    // A load exactly equal to the free budget fits, leaving zero available power.
     testing.expect(t, toggle(&state, {id="C1"}) == .Applied)
     testing.expect(t, balance(&state).available_kw == 0)
-    testing.expect(t, toggle(&state, {id="P1"}) == .Generator_Required)
+    testing.expect(t, toggle(&state, {id="G1"}) == .Generator_Required)
     testing.expect(t, toggle(&state, {id="C1"}) == .Applied)
-    testing.expect(t, toggle(&state, {id="P1"}) == .Generator_Required)
-    testing.expect(t, state.active[1] && balance(&state).available_kw == 2)
-    testing.expect(t, initial_balance(initial[:], definitions[:]) == 0)
-    definitions[0].power_need_kw = 2
-    testing.expect(t, initial_balance(initial[:], definitions[:]) < 0)
+    testing.expect(t, balance(&state).available_kw == 3)
+    // Startup validation sums only the buildings that start active.
+    testing.expect(t, initial_balance(initial[:], definitions[:]) == 1)
+    initial[2].enable_at_start = true
+    testing.expect(t, initial_balance(initial[:], definitions[:]) == -2)
 }
 
 @(test)

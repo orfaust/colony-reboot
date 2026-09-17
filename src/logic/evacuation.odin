@@ -10,7 +10,9 @@ reconcile_evacuations :: proc(state: ^Transport_State, game: ^State) {
         if state.last_active[i] && !game.active[i] && state.occupants[i] > 0 {
             state.evacuation_pending[i] = true
             for &subject in state.subjects {
-                if subject.residence == building.id && (subject.activity == .Inside || subject.activity == .Moving || subject.activity == .Waiting) {
+                // Medical patients are owned exclusively by the medical path and are
+                // never enrolled in an ordinary residence evacuation.
+                if subject.medical == .None && subject.residence == building.id && (subject.activity == .Inside || subject.activity == .Moving || subject.activity == .Waiting) {
                     subject.evacuating = true
                 }
             }
@@ -26,7 +28,7 @@ reconcile_evacuations :: proc(state: ^Transport_State, game: ^State) {
         state.evacuation_started[i] = true
         remaining := false
         for &subject in state.subjects {
-            if subject.residence != building.id || !subject.evacuating { continue }
+            if subject.residence != building.id || !subject.evacuating || subject.medical != .None { continue }
             remaining = true
             if subject.evacuation_platform != "" { continue }
             // Stable walking anchor, not an exclusive ship reservation. A missing
@@ -79,7 +81,7 @@ dispatch_evacuations :: proc(state: ^Transport_State, game: ^State) {
                     first := -1
                     capacity: f32
                     for subject, index in state.subjects {
-                        if !subject.evacuating || subject.evacuation_reserved || subject.residence != building.id || subject.evacuation_platform == "" { continue }
+                        if !subject.evacuating || subject.evacuation_reserved || subject.medical != .None || subject.residence != building.id || subject.evacuation_platform == "" { continue }
                         capacity = 0
                         for entry in ship.subjects { if entry.subject_id == subject.subject_id { capacity = entry.capacity; break } }
                         capacity = min(capacity,evacuation_station_room(state,subject.subject_id))
@@ -89,13 +91,13 @@ dispatch_evacuations :: proc(state: ^Transport_State, game: ^State) {
                     person := state.subjects[first]
                     count := 0
                     for subject in state.subjects {
-                        if subject.evacuating && !subject.evacuation_reserved && subject.residence == building.id && subject.subject_id == person.subject_id && subject.evacuation_platform == person.evacuation_platform { count += 1 }
+                        if subject.evacuating && !subject.evacuation_reserved && subject.medical == .None && subject.residence == building.id && subject.subject_id == person.subject_id && subject.evacuation_platform == person.evacuation_platform { count += 1 }
                     }
                     units := min(count,int(min(f32(SUBJECT_LIMIT),capacity)))
                     manifest := make([]int,units,state.allocator)
                     n := 0
                     for &subject, index in state.subjects {
-                        if !subject.evacuating || subject.evacuation_reserved || subject.residence != building.id || subject.subject_id != person.subject_id || subject.evacuation_platform != person.evacuation_platform { continue }
+                        if !subject.evacuating || subject.evacuation_reserved || subject.medical != .None || subject.residence != building.id || subject.subject_id != person.subject_id || subject.evacuation_platform != person.evacuation_platform { continue }
                         subject.evacuation_reserved = true
                         manifest[n] = index
                         n += 1
@@ -109,8 +111,7 @@ dispatch_evacuations :: proc(state: ^Transport_State, game: ^State) {
                         duration=travel_duration(route,f64(ship.max_speed),f64(ship.max_speed_hours))}
                     // Empty flight; no fictitious station loading or stock withdrawal.
                     set_transport_phase(&mission,.Outbound,mission.duration)
-                    state.missions[state.count] = mission
-                    state.count += 1
+                    append_mission(state,mission)
                     available.units -= 1
                 }
             }
@@ -138,9 +139,14 @@ board_evacuating_subjects :: proc(state: ^Transport_State, game: ^State, mission
             building.residents_amount = state.occupants[i]
             break
         }
+        if mission.medical && subject.medical_home == "" { subject.medical_home = subject.residence }
         subject.residence = ""
         subject.occupation = ""
         subject.activity = .Onboard
+        if mission.medical {
+            subject.medical = .Evacuating
+            subject.medical_reserved = false
+        }
         mission.loaded += 1
     }
     return true

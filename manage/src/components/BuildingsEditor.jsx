@@ -5,7 +5,6 @@ import ExtraFields from './ExtraFields.jsx';
 import BuildingSubjectRoles, { newBuildingRoles } from './BuildingSubjectRoles.jsx';
 import { followIdRename } from '../lib/textKeys.js';
 import { NEED_AMOUNT_FIELDS, PRODUCT_RATE_FIELDS, SPRITE_PATH_ERROR, validSpritePath, buildingTypeSchema } from '../lib/schema.js';
-import { WORLD_SCALE } from '../lib/game.js';
 import { clone, contrastText, isPlainObject, moveItem, objectItems, rgbToHex, uniqueName } from '../lib/object.js';
 
 function uniqueCode(base, taken) {
@@ -22,8 +21,8 @@ function newBuilding(id, data) {
     name_key: `building_${id}_name`,
     description_key: `building_${id}_description`,
     code: uniqueCode(initials, data.map((b) => b?.code)),
-    width: 1.5,
-    height: 1.5,
+    width: 64,
+    height: 64,
     color: { r: 200, g: 200, b: 200 },
     power_need_kw: 0,
     power_output_kw: 0,
@@ -41,8 +40,8 @@ function newBuilding(id, data) {
 }
 
 function SizePreview({ building }) {
-  const w = Math.max(0, Number(building.width) || 0) * WORLD_SCALE;
-  const h = Math.max(0, Number(building.height) || 0) * WORLD_SCALE;
+  const w = Math.max(0, Number(building.width) || 0);
+  const h = Math.max(0, Number(building.height) || 0);
   const scale = Math.min(1, 220 / Math.max(w, h, 1));
   return (
     <div className="size-preview">
@@ -53,7 +52,7 @@ function SizePreview({ building }) {
         {building.code}
       </div>
       <small>
-        {w}×{h} screen units in game{scale < 1 ? ` (preview at ${Math.round(scale * 100)}%)` : ''}
+        {w}×{h} pixels{scale < 1 ? ` (preview at ${Math.round(scale * 100)}%)` : ''}
       </small>
     </div>
   );
@@ -63,7 +62,7 @@ function SizePreview({ building }) {
  * `amountFields` are alternatives: each item stores exactly one, chosen with a select when there are several.
  * `extraFields` ({ field, label }) are additional numbers every item stores, shown on a second line.
  */
-export function RecipeList({ title, addLabel, items, amountFields, amountHint, extraFields = [], resources, onChange }) {
+export function RecipeList({ title, addLabel, items, amountFields, amountHint, hint, extraFields = [], resources, onChange }) {
   const list = Array.isArray(items) ? items : [];
   const options = resources.map((r) => ({ value: r.id, label: r.id }));
   const patch = (i, change) => onChange(list.map((it, j) => (j === i ? { ...it, ...change } : it)));
@@ -79,6 +78,7 @@ export function RecipeList({ title, addLabel, items, amountFields, amountHint, e
   return (
     <fieldset className="recipe">
       <legend>{title}</legend>
+      {hint && <small className="field-hint">{hint}</small>}
       {list.length === 0 && <p className="empty small">None</p>}
       {list.map((item, i) => {
         const field = fieldOf(item);
@@ -121,7 +121,7 @@ export function RecipeList({ title, addLabel, items, amountFields, amountHint, e
         type="button"
         className="btn tiny"
         disabled={resources.length === 0}
-        title={resources.length === 0 ? 'Define resources in config/resources.json first' : undefined}
+        title={resources.length === 0 ? 'Define resources in resources.json first' : undefined}
         onClick={() =>
           onChange([...list, { resource_id: resources[0].id, [amountFields[0]]: 1, ...Object.fromEntries(extraFields.map(({ field }) => [field, 0])) }])
         }
@@ -132,7 +132,7 @@ export function RecipeList({ title, addLabel, items, amountFields, amountHint, e
   );
 }
 
-/** Subjects the building hosts: null, or one subject type (config/subjects.json) with a positive capacity. */
+/** Subjects the building hosts: null, or one subject type (subjects.json) with a positive capacity. */
 function ResidentsField({ building, ctx, onChange }) {
   const subjects = objectItems(ctx.subjects);
   const residents = isPlainObject(building.residents) ? building.residents : null;
@@ -165,7 +165,7 @@ function ResidentsField({ building, ctx, onChange }) {
           ? 'Subject type it hosts and how many (capacity > 0)'
           : subjects.length
             ? 'Hosts no subjects (residents: null)'
-            : 'Define subject types in config/subjects.json first'}
+            : 'Define subject types in subjects.json first'}
       </small>
     </div>
   );
@@ -239,10 +239,10 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
 
       <div className="form-split">
         <div className="form-grid">
-          <Field label="Width" hint="World units (> 0)" error={!(building.width > 0) ? 'Must be positive' : null}>
+          <Field label="Width" hint="Pixels (> 0)" error={!(building.width > 0) ? 'Must be positive' : null}>
             <NumberInput value={building.width} min={0} onChange={(v) => set('width', v)} />
           </Field>
-          <Field label="Height" hint="World units (> 0)" error={!(building.height > 0) ? 'Must be positive' : null}>
+          <Field label="Height" hint="Pixels (> 0)" error={!(building.height > 0) ? 'Must be positive' : null}>
             <NumberInput value={building.height} min={0} onChange={(v) => set('height', v)} />
           </Field>
           <Field label="Sprite path" wide hint="Optional repository-relative PNG path. Empty uses color. Files are checked by python tools/build.py." error={validSpritePath(building.sprite) ? null : SPRITE_PATH_ERROR}>
@@ -251,10 +251,10 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
           <Field label="Color" wide>
             <ColorInput value={building.color} onChange={(v) => set('color', v)} />
           </Field>
-          <Field label="Power need" hint="kW (≥ 0)">
+          <Field label="Power need" hint="kW (≥ 0; a building either produces or consumes power; must be 0 when always_on)">
             <NumberInput value={building.power_need_kw} min={0} onChange={(v) => set('power_need_kw', v)} />
           </Field>
-          <Field label="Power output" hint="kW (≥ 0)">
+          <Field label="Power output" hint="kW (≥ 0; a building either produces or consumes power)">
             <NumberInput value={building.power_output_kw} min={0} onChange={(v) => set('power_output_kw', v)} />
           </Field>
           <Checkbox checked={building.always_on === true} onChange={(v) => set('always_on', v)} label="Always on (cannot be switched off)" />
@@ -285,14 +285,9 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
           title="Needs"
           addLabel="Add need"
           items={building.needs}
-          // amount_per_resident is offered only with residents (or while a need still uses it).
-          amountFields={
-            isPlainObject(building.residents) || (Array.isArray(building.needs) && building.needs.some((n) => n?.amount_per_resident !== undefined))
-              ? NEED_AMOUNT_FIELDS
-              : NEED_AMOUNT_FIELDS.filter((f) => f !== 'amount_per_resident')
-          }
+          amountFields={NEED_AMOUNT_FIELDS}
           amountHint={(it, field) =>
-            `${unitOf(it.resource_id)} ${{ amount_per_unit: 'per produced unit', amount_per_hour: 'per hour', amount_per_resident: 'per resident per hour' }[field]}`
+            `${unitOf(it.resource_id)} ${{ amount_per_unit: 'per produced unit', amount_per_hour: 'per hour' }[field]}`
           }
           extraFields={[{ field: 'capacity', label: 'Capacity' }]}
           resources={resources}
@@ -301,18 +296,11 @@ function BuildingForm({ index, building, data, onChange, ctx }) {
         <RecipeList
           title="Produces"
           addLabel="Add product"
+          hint="The first product is the reference for every “per produced unit” need; reorder to change the ratios."
           items={building.produces}
-          // amount_per_resident is offered only with residents (or while a product still uses it).
-          amountFields={
-            isPlainObject(building.residents) || (Array.isArray(building.produces) && building.produces.some((p) => p?.amount_per_resident !== undefined))
-              ? PRODUCT_RATE_FIELDS
-              : ['units_per_hour']
-          }
-          amountHint={(it, field) =>
-            field === 'amount_per_resident'
-              ? `${unitOf(it.resource_id)} per resident per hour`
-              : `${unitOf(it.resource_id)} per hour`
-          }
+          // Building products have a single rate: units per hour.
+          amountFields={PRODUCT_RATE_FIELDS}
+          amountHint={(it) => `${unitOf(it.resource_id)} per hour`}
           extraFields={[
             { field: 'capacity', label: 'Capacity' },
           ]}

@@ -1,20 +1,22 @@
 // Validation rules for the asset files, derived from the strict Odin loaders
-// (src/config, src/localization) and the current JSON layout:
-//   config/buildings.json  — array of building types, identified by `id`
-//   config/resources.json  — array of resources, identified by `id`
+// (src/config, src/localization) and the current JSON layout. Paths are relative to
+// the selected configuration version directory (assets/config/<version>/):
+//   buildings.json         — array of building types, identified by `id`
+//   resources.json         — array of resources, identified by `id`
 //   levels/*.json          — instances referencing a building type through `building_id`
+//   localization/en.json   — every player-facing UI text
 // Keep these rules in sync when the Odin structures change.
 import { isPlainObject } from './object.js';
 import { storedIssues } from './stored.js';
 import { KEY_DEFAULTS, INPUT_NAMES, normalizeInput } from './station.js';
 
-export const BUILDINGS_PATH = 'config/buildings.json';
-export const RESOURCES_PATH = 'config/resources.json';
-export const SUBJECTS_PATH = 'config/subjects.json';
-export const SUBJECT_ROLES_PATH = 'config/subject_roles.json';
-export const SHIPS_PATH = 'config/ships.json';
-export const STATIONS_PATH = 'config/space_stations.json';
-export const KEY_BINDINGS_PATH = 'config/key_bindings.json';
+export const BUILDINGS_PATH = 'buildings.json';
+export const RESOURCES_PATH = 'resources.json';
+export const SUBJECTS_PATH = 'subjects.json';
+export const SUBJECT_ROLES_PATH = 'subject_roles.json';
+export const SHIPS_PATH = 'ships.json';
+export const STATIONS_PATH = 'space_stations.json';
+export const KEY_BINDINGS_PATH = 'key_bindings.json';
 export const TEXTS_PATH = 'localization/en.json';
 export const CONTROL_UNIT_ID = 'control_unit'; // contracts.CONTROL_UNIT_ID
 
@@ -29,10 +31,12 @@ const obj = (fields, oneOf = []) => ({ type: 'object', fields, oneOf });
 const arr = (item) => ({ type: 'array', item });
 const nullable = (schema) => ({ ...schema, nullable: true }); // Odin `config:"nullable"` tag
 const enumOf = (values) => ({ type: 'enum', values });
+// logic.valid_ship_type: ordinary dispatch uses transport; medical missions use emergency.
+export const SHIP_TYPES = ['transport', 'emergency'];
 
 export const keyBindingsSchema = obj(Object.fromEntries(Object.keys(KEY_DEFAULTS).map((key) => [key, key === 'version' ? int : arr(str)])));
 export const colorSchema = obj({ r: u8, g: u8, b: u8 });
-export const shipSchema = obj({ id: str, code: str, sprite: assetPathSchema, width: f32, height: f32, color: colorSchema, name_key: str, type: str, max_speed: f32, max_speed_hours: f32, units_per_hour: f32, subjects: arr(obj({ subject_id: str, capacity: f32 })) });
+export const shipSchema = obj({ id: str, code: str, sprite: assetPathSchema, width: f32, height: f32, color: colorSchema, name_key: str, type: enumOf(SHIP_TYPES), max_speed: f32, max_speed_hours: f32, units_per_hour: f32, subjects: arr(obj({ subject_id: str, capacity: f32 })) });
 export const stationSchema = obj({
   id: str,
   code: str,
@@ -42,21 +46,25 @@ export const stationSchema = obj({
   ships: arr(obj({ ship_id: str, units: int })),
 });
 
-export const NEED_AMOUNT_FIELDS = ['amount_per_unit', 'amount_per_hour', 'amount_per_resident'];
+export const NEED_AMOUNT_FIELDS = ['amount_per_unit', 'amount_per_hour'];
+// Matches logic.NEED_SLOT_LIMIT: runtime need state uses fixed per-subject arrays.
+export const SUBJECT_NEED_LIMIT = 8;
 export const needSchema = obj(
-  { resource_id: str, amount_per_unit: f32, amount_per_hour: f32, amount_per_resident: f32, capacity: f32 },
+  { resource_id: str, amount_per_unit: f32, amount_per_hour: f32, capacity: f32 },
   NEED_AMOUNT_FIELDS,
 );
 // Building types only declare storage capacity; the units held belong to level instances (`stored`).
-// Building products take exactly one rate; amount_per_resident also requires the building's residents.
-export const PRODUCT_RATE_FIELDS = ['units_per_hour', 'amount_per_resident'];
-export const buildingProductSchema = obj({ resource_id: str, units_per_hour: f32, amount_per_resident: f32, capacity: f32 }, PRODUCT_RATE_FIELDS);
+// A building product has one rate: units_per_hour. Per-capita consumption lives only in subject needs.
+export const PRODUCT_RATE_FIELDS = ['units_per_hour'];
+export const buildingProductSchema = obj({ resource_id: str, units_per_hour: f32, capacity: f32 }, PRODUCT_RATE_FIELDS);
 // Subjects hold no stock: their products have no capacity or stored amount.
 export const subjectProductSchema = obj({ resource_id: str, units_per_hour: f32 });
 // A resource a building type can hold beyond its needs and products.
 export const storageSchema = obj({ resource_id: str, capacity: f32 });
 export const SUBJECT_ROLES = ['worker', 'supervisor', 'repairer']; // logic.Subject_Role
-export const buildingRoleSchema = obj({ role_id: enumOf(SUBJECT_ROLES), quantity: f32, required: bool });
+// logic.Staffing_Mode: continuous keeps every slot covered; on_demand waits for a request.
+export const STAFFING_MODES = ['continuous', 'on_demand'];
+export const buildingRoleSchema = obj({ role_id: enumOf(SUBJECT_ROLES), quantity: int, staffing_mode: enumOf(STAFFING_MODES) });
 export const buildingTypeSchema = obj({
   id: str,
   sprite: assetPathSchema,
@@ -74,7 +82,7 @@ export const buildingTypeSchema = obj({
   min_operative_health: f32,
   materials_amount: f32,
   subject_roles: arr(buildingRoleSchema),
-  residents: nullable(obj({ type: str, capacity: f32 })), // null: hosts no subjects; type is a config/subjects.json id
+  residents: nullable(obj({ type: str, capacity: f32 })), // null: hosts no subjects; type is a subjects.json id
   needs: arr(needSchema),
   produces: arr(buildingProductSchema),
   storage: arr(storageSchema), // level instances keep a stored entry for these resources too
@@ -96,8 +104,24 @@ export const buildingInstanceSchema = obj({
   residents_amount: nullable(f32), // a number only when the building type has residents, null otherwise
   stored: arr(obj({ resource_id: str, amount: f32 })), // one entry per resource the building type produces
 });
-export const roleSchema = obj({ id: str, name_key: str, color: colorSchema, sprite: assetPathSchema });
+export const roleSchema = obj({ id: str, name_key: str });
 export const subjectRoleSchema = obj({ role_id: enumOf(SUBJECT_ROLES), sprite: { ...str, optional: true } });
+export const subjectNeedSchema = obj({
+  resource_id: str,
+  amount_per_hour: f32,
+  shortage_alert_time: f32,
+  shortage_max_time: f32,
+  satisfied_health_gain_per_hour: f32,
+  max_shortage_health_loss_per_hour: f32,
+});
+export const healthRatesSchema = obj({
+  work_gain_per_hour: f32,
+  rest_gain_per_hour: f32,
+  extra_work_loss_per_hour: f32,
+  max_inactivity_loss_per_hour: f32,
+  inactivity_max_time: f32,
+  station_recovery_per_hour: f32,
+});
 export const subjectTypeSchema = obj({
   id: str,
   width: f32,
@@ -107,18 +131,24 @@ export const subjectTypeSchema = obj({
   color: colorSchema,
   rest_time: f32,
   work_time: f32,
+  extra_work_time: f32,
+  min_work_health: f32,
+  min_colony_health: f32,
+  health_rates: healthRatesSchema,
   roles: nullable(arr(subjectRoleSchema)), // roles the type can take, without duplicates; null (or []) means none
   // shortage_alert_time: hours without the resource before complaining (starving starts as soon as it is denied);
   // shortage_max_time: hours in shortage before dying or shutting down
-  needs: arr(obj({ resource_id: str, amount_per_hour: f32, shortage_alert_time: f32, shortage_max_time: f32 })),
+  needs: arr(subjectNeedSchema),
   produces: arr(subjectProductSchema),
 });
-// residence/occupation are building instance ids of the same level; occupation may be null.
+// initial_assignment replaces the former occupation: a building instance id plus a role, or null.
+export const initialAssignmentSchema = obj({ building_id: str, role_id: enumOf(SUBJECT_ROLES) });
 export const subjectInstanceSchema = obj({
   id: str,
   subject_id: str,
   residence: str,
-  occupation: nullable(str),
+  health: f32, // individual health in [0,1]; generated residents default to 1
+  initial_assignment: nullable(initialAssignmentSchema),
   roles: arr(enumOf(SUBJECT_ROLES)), // nonempty, without duplicates
   speed: f32,
 });
@@ -133,6 +163,15 @@ export const levelSchema = obj({ version: int, level: int, buildings: arr(buildi
 // Named fields of localization.Text; the game refuses to start without them.
 export const POWER_FORMAT_KEYS = ['power_output_format', 'power_need_format', 'power_available_format'];
 export const EXTRA_FORMAT_TOKENS = {
+  notice_staffing_lost: ['{name}', '{id}'],
+  notice_staffing_restored: ['{name}', '{id}'],
+  notice_production_blocked: ['{name}', '{id}'],
+  notice_production_resumed: ['{name}', '{id}'],
+  notice_power_shed: ['{buildings}'],
+  notice_insufficient_power: ['{name}', '{id}'],
+  notice_insufficient_health: ['{name}', '{id}'],
+  notice_always_on_locked: ['{name}', '{id}'],
+  notice_generator_required: ['{name}', '{id}'],
   transport_cargo_format: ['{units}', '{name}', '{destination}'],
   transport_trip_format: ['{remaining}'],
   transport_speed_format: ['{speed}', '{max_speed}'],
@@ -145,26 +184,54 @@ export const EXTRA_FORMAT_TOKENS = {
   building_info_power_need: ['{value}'],
   building_info_level: ['{value}'],
   building_info_residents: ['{name}', '{amount}', '{capacity}'],
-  building_info_workers: ['{assigned}', '{required}'],
-  building_info_supervisors: ['{assigned}', '{required}'],
-  building_info_repairers: ['{assigned}', '{required}'],
+  building_info_workers: ['{covered}', '{required}'],
+  building_info_supervisors: ['{covered}', '{required}'],
+  building_info_repairers: ['{covered}', '{required}'],
+  building_info_coverage_reserved: ['{role}', '{reserved}'],
+  building_info_coverage_ondemand: ['{role}', '{quantity}'],
+  building_info_uncovered: ['{count}'],
+  subject_info_identity: ['{name}', '{id}'],
+  subject_info_health: ['{value}'],
+  subject_info_phase: ['{value}'],
+  subject_info_role: ['{value}'],
+  subject_info_assignment: ['{value}'],
+  subject_info_slot: ['{building}', '{slot}'],
+  subject_info_timers: ['{work}', '{max_work}', '{rest}', '{max_rest}', '{idle}'],
+  subject_info_medical: ['{value}'],
+  subject_info_need_ok: ['{name}', '{value}'],
+  subject_info_need_short: ['{name}', '{value}', '{hours}'],
   building_info_stock: ['{name}', '{amount}', '{capacity}', '{unit}'],
+  building_info_stock_flow: ['{name}', '{consumed}', '{produced}', '{unit}'],
+  building_info_production: ['{value}'],
   building_info_rate_hour: ['{value}', '{unit}'],
   building_info_rate_product: ['{value}', '{unit}'],
-  building_info_rate_resident: ['{value}', '{unit}'],
 };
 export const REQUIRED_TEXT_KEYS = [
   'transport_travelling', 'transport_arrived',
   'transport_loading', 'transport_waiting_landing', 'transport_landing', 'transport_unloading',
   'transport_taking_off', 'transport_braking', 'transport_returning', 'transport_return_unloading',
-  'transport_cancelled', 'transport_eta_unknown',
+  'transport_cancelled', 'transport_eta_unknown', 'transport_awaiting_approval',
   'station_resources', 'station_subjects', 'station_ships', 'station_empty',
   'building_info_active', 'building_info_inactive', 'building_info_close',
   'building_info_subjects', 'building_info_no_residents', 'building_info_needs',
-  'building_info_products', 'building_info_empty', 'building_info_scroll', 'info_scroll_hint', 'building_info_no_staff',
+  'building_info_products', 'building_info_empty', 'building_info_stock_header', 'building_info_scroll', 'info_scroll_hint', 'building_info_no_staff',
+  'modal_buildings_toggle', 'modal_subjects_toggle', 'modal_buildings_title', 'modal_subjects_title',
+  'modal_scroll_hint', 'modal_none',
+  'grid_building_code', 'grid_building_name', 'grid_building_state', 'grid_building_health',
+  'grid_building_activity', 'grid_building_power_out', 'grid_building_power_need',
+  'grid_building_residents', 'grid_building_staffing',
+  'grid_building_needs', 'grid_building_products', 'grid_building_storage',
+  'grid_subject_id', 'grid_subject_name', 'grid_subject_health', 'grid_subject_phase',
+  'grid_subject_residence', 'grid_subject_occupation', 'grid_subject_role', 'grid_subject_medical', 'grid_subject_timers',
+  'building_info_staffing', 'building_info_individuals', 'building_info_no_individuals',
+  'subject_info_unassigned', 'subject_info_needs', 'subject_info_no_needs',
+  'work_phase_idle', 'work_phase_resting', 'work_phase_reserved', 'work_phase_moving_to_work', 'work_phase_working', 'work_phase_extra_working',
+  'medical_status_none', 'medical_status_pending_evacuation', 'medical_status_evacuating', 'medical_status_hospitalized', 'medical_status_returning',
+  'production_state_operational', 'production_state_inactive', 'production_state_warming_up', 'production_state_unstaffed', 'production_state_missing_input', 'production_state_output_full',
   ...Object.keys(EXTRA_FORMAT_TOKENS),
   'window_title',
   'menu_title',
+  'resume_game',
   'play',
   'load',
   'settings',
@@ -179,6 +246,11 @@ export const REQUIRED_TEXT_KEYS = [
   'notice_generator_required',
   'notice_control_unit_locked',
   'notice_insufficient_health',
+  'notice_staffing_lost',
+  'notice_staffing_restored',
+  'notice_medical_evacuation',
+  'notice_medical_return',
+  'notice_subject_died',
 ];
 
 // Same relative tolerance as logic.power_shortage: f32 rounding only, no free power.
@@ -266,10 +338,10 @@ export function validateResources(data, texts) {
 function checkProducts(list, path, label, resourceIds, issues, isSubject) {
   (Array.isArray(list) ? list : []).forEach((product, j) => {
     const error = (message) => issues.push({ level: 'error', path: `${path}.produces[${j}]`, message: `${label} product: ${message}` });
-    // Absent rate fields count as zero, like the decoded Odin struct. Subject products have no amount_per_resident.
+    // Absent rate fields count as zero, like the decoded Odin struct. Subject products have only units_per_hour.
     const rateFields = isSubject ? ['units_per_hour'] : PRODUCT_RATE_FIELDS;
     if (!(Math.max(...rateFields.map((f) => Math.fround(product?.[f] ?? 0))) > 0))
-      error(isSubject ? 'units_per_hour must be positive' : 'units_per_hour or amount_per_resident must be positive');
+      error('units_per_hour must be positive');
     if (resourceIds && !resourceIds.has(product?.resource_id)) error(`resource_id "${product?.resource_id}" is not defined in ${RESOURCES_PATH}`);
     if (!isSubject && Math.fround(product?.capacity) < 0) error('capacity must be nonnegative');
   });
@@ -292,7 +364,6 @@ export function validateRoles(data, texts) {
     if (!SUBJECT_ROLES.includes(role.id)) issues.push({ level: 'error', path: `${path}.id`, message: 'unknown simulation role ID' });
     if (data.slice(0, i).some((previous) => previous?.id === role.id)) issues.push({ level: 'error', path: `${path}.id`, message: 'duplicate role ID' });
     checkTextKey(role.name_key, texts, `${path}.name_key`, issues);
-    if (!validSpritePath(role.sprite)) issues.push({ level: 'error', path: `${path}.sprite`, message: SPRITE_PATH_ERROR });
   });
   for (const id of SUBJECT_ROLES) if (!data.some((role) => role?.id === id))
     issues.push({ level: 'error', path: '$', message: `missing required role "${id}"` });
@@ -318,9 +389,15 @@ export function validateBuildings(data, texts, resources, subjects) {
     if (previous.some((p) => p?.code === d.code)) issues.push({ level: 'error', path: `${path}.code`, message: `${label}: duplicate code "${d.code}"` });
     // Range checks use Math.fround: the loader compares the stored f32, so 1e-50 is 0.
     if (!(Math.fround(d.width) > 0) || !(Math.fround(d.height) > 0))
-      issues.push({ level: 'error', path, message: `${label}: width and height must be positive world-unit dimensions` });
+      issues.push({ level: 'error', path, message: `${label}: width and height must be positive pixel dimensions` });
     if (Math.fround(d.power_need_kw) < 0 || Math.fround(d.power_output_kw) < 0)
       issues.push({ level: 'error', path, message: `${label}: power values must be nonnegative kW` });
+    // Mirrors config.decode_catalog: a building either produces or consumes power, and
+    // an always_on type must never consume because it can never be stopped.
+    if (Math.fround(d.power_need_kw) > 0 && Math.fround(d.power_output_kw) > 0)
+      issues.push({ level: 'error', path, message: `${label}: power_need_kw and power_output_kw are mutually exclusive; a building either produces or consumes power` });
+    if (d.always_on === true && Math.fround(d.power_need_kw) > 0)
+      issues.push({ level: 'error', path: `${path}.power_need_kw`, message: `${label}: always_on requires power_need_kw == 0` });
     if (Math.fround(d.warmup_time) < 0 || Math.fround(d.cooldown_time) < 0)
       issues.push({ level: 'error', path, message: `${label}: warmup_time and cooldown_time must be nonnegative hours` });
     const minHealth = Math.fround(d.min_operative_health);
@@ -328,7 +405,7 @@ export function validateBuildings(data, texts, resources, subjects) {
       issues.push({ level: 'error', path: `${path}.min_operative_health`, message: `${label}: min_operative_health must be in [0,1]` });
     if (Math.fround(d.materials_amount) < 0) issues.push({ level: 'error', path: `${path}.materials_amount`, message: `${label}: materials_amount must be nonnegative` });
     if (Array.isArray(d.subject_roles)) d.subject_roles.forEach((role, j) => {
-      if (Math.fround(role?.quantity) < 0) issues.push({ level: 'error', path: `${path}.subject_roles[${j}].quantity`, message: 'quantity must be nonnegative' });
+      if (!Number.isInteger(role?.quantity) || role.quantity < 0) issues.push({ level: 'error', path: `${path}.subject_roles[${j}].quantity`, message: 'quantity must be a nonnegative integer' });
       if (d.subject_roles.slice(0, j).some((r) => r?.role_id === role?.role_id)) issues.push({ level: 'error', path: `${path}.subject_roles[${j}].role_id`, message: 'duplicate role_id' });
     });
     // Mirrors config.decode_catalog / validate_residents: null, or a subject type with a positive capacity.
@@ -350,17 +427,15 @@ export function validateBuildings(data, texts, resources, subjects) {
         if (resourceIds && !resourceIds.has(item?.resource_id))
           issues.push({ level: 'error', path: p, message: `${label} ${what}: resource_id "${item?.resource_id}" is not defined in ${RESOURCES_PATH}` });
       });
-    checkRecipe(d.needs, 'needs', 'need', NEED_AMOUNT_FIELDS, 'amount_per_unit, amount_per_hour, or amount_per_resident must be positive');
+    checkRecipe(d.needs, 'needs', 'need', NEED_AMOUNT_FIELDS, 'amount_per_unit or amount_per_hour must be positive');
     (Array.isArray(d.needs) ? d.needs : []).forEach((need, j) => {
       if (Math.fround(need?.capacity) < 0) issues.push({ level: 'error', path: `${path}.needs[${j}]`, message: `${label} need: capacity must be nonnegative` });
-      if (need?.amount_per_resident !== undefined && !hostsResidents)
-        issues.push({ level: 'error', path: `${path}.needs[${j}]`, message: `${label} need: amount_per_resident requires residents` });
+      // The first product is the reference ratio for every per-unit need.
+      const reference = Array.isArray(d.produces) ? Math.fround(d.produces[0]?.units_per_hour ?? 0) : 0;
+      if (Math.fround(need?.amount_per_unit) > 0 && !(reference > 0))
+        issues.push({ level: 'error', path: `${path}.needs[${j}]`, message: `${label} need: amount_per_unit requires the first produces entry to have a positive units_per_hour (the reference product)` });
     });
     checkProducts(d.produces, path, label, resourceIds, issues, false);
-    (Array.isArray(d.produces) ? d.produces : []).forEach((product, j) => {
-      if (product?.amount_per_resident !== undefined && !hostsResidents)
-        issues.push({ level: 'error', path: `${path}.produces[${j}]`, message: `${label} product: amount_per_resident requires residents` });
-    });
     // Mirrors config.decode_catalog: storage entries reference resources, without duplicates.
     (Array.isArray(d.storage) ? d.storage : []).forEach((stock, j) => {
       const error = (message) => issues.push({ level: 'error', path: `${path}.storage[${j}]`, message: `${label} storage: ${message}` });
@@ -383,7 +458,7 @@ export function validateSubjects(data, texts, resources) {
     if (!isPlainObject(s)) return;
     const label = `subject "${s.id}"`;
     for (const field of ['width', 'height']) if (!(Math.fround(s[field]) > 0))
-      issues.push({ level: 'error', path: `${path}.${field}`, message: `${field} must be a positive world-unit dimension` });
+      issues.push({ level: 'error', path: `${path}.${field}`, message: `${field} must be a positive pixel dimension` });
     if (!validSpritePath(s.sprite)) issues.push({ level: 'error', path: `${path}.sprite`, message: SPRITE_PATH_ERROR });
     if (data.slice(0, i).some((p) => p?.id === s.id)) issues.push({ level: 'error', path: `${path}.id`, message: `${label}: duplicate ID` });
     checkTextKey(s.name_key, texts, `${path}.name_key`, issues);
@@ -392,11 +467,27 @@ export function validateSubjects(data, texts, resources) {
       if (!(Math.fround(need?.amount_per_hour) > 0)) issues.push({ level: 'error', path: p, message: `${label} need: amount_per_hour must be positive` });
       if (Math.fround(need?.shortage_alert_time) < 0) issues.push({ level: 'error', path: p, message: `${label} need: shortage_alert_time must be nonnegative hours` });
       if (Math.fround(need?.shortage_max_time) < 0) issues.push({ level: 'error', path: p, message: `${label} need: shortage_max_time must be nonnegative hours` });
+      if (!(Math.fround(need?.satisfied_health_gain_per_hour) >= 0)) issues.push({ level: 'error', path: p, message: `${label} need: satisfied_health_gain_per_hour must be nonnegative` });
+      if (!(Math.fround(need?.max_shortage_health_loss_per_hour) >= 0)) issues.push({ level: 'error', path: p, message: `${label} need: max_shortage_health_loss_per_hour must be nonnegative` });
       if (resourceIds && !resourceIds.has(need?.resource_id))
         issues.push({ level: 'error', path: p, message: `${label} need: resource_id "${need?.resource_id}" is not defined in ${RESOURCES_PATH}` });
     });
+    if (Array.isArray(s.needs) && s.needs.length > SUBJECT_NEED_LIMIT)
+      issues.push({ level: 'error', path: `${path}.needs`, message: `${label}: at most ${SUBJECT_NEED_LIMIT} needs are supported per subject type` });
     if (Math.fround(s.rest_time) < 0 || Math.fround(s.work_time) < 0)
       issues.push({ level: 'error', path, message: `${label}: rest_time and work_time must be nonnegative hours` });
+    if (!(Math.fround(s.extra_work_time) >= 0))
+      issues.push({ level: 'error', path: `${path}.extra_work_time`, message: `${label}: extra_work_time must be nonnegative hours` });
+    const minColony = Math.fround(s.min_colony_health);
+    const minWork = Math.fround(s.min_work_health);
+    if (!(minColony >= 0 && minWork <= 1 && minColony < minWork))
+      issues.push({ level: 'error', path, message: `${label}: health thresholds must satisfy 0 <= min_colony_health < min_work_health <= 1` });
+    if (isPlainObject(s.health_rates)) {
+      for (const [field, value] of Object.entries(s.health_rates)) {
+        if (!(Math.fround(value) >= 0))
+          issues.push({ level: 'error', path: `${path}.health_rates.${field}`, message: `${label}: health rate must be nonnegative` });
+      }
+    }
     if (Array.isArray(s.roles)) {
       if (new Set(s.roles.map((r) => r?.role_id)).size !== s.roles.length)
         issues.push({ level: 'error', path: `${path}.roles`, message: `${label}: duplicate role` });
@@ -491,20 +582,37 @@ export function validateLevel(data, buildings, path, subjects, stations) {
       if (hosted && residents > Math.fround(hosted.capacity))
         issues.push({ level: 'error', path: `${p}.residence`, message: `residence "${s.residence}" exceeds its residents.capacity (${hosted.capacity})` });
     }
-    if (typeof s.occupation === 'string' && !instanceIds.has(s.occupation))
-      issues.push({ level: 'error', path: `${p}.occupation`, message: `occupation "${s.occupation}" must be null or a building instance ID in this level` });
+    if (!(Math.fround(s.health) >= 0 && Math.fround(s.health) <= 1))
+      issues.push({ level: 'error', path: `${p}.health`, message: 'health must be in [0,1]' });
     if (!(Math.fround(s.speed) > 0)) issues.push({ level: 'error', path: `${p}.speed`, message: 'speed must be positive' });
     if (Array.isArray(s.roles) && new Set(s.roles).size !== s.roles.length)
       issues.push({ level: 'error', path: `${p}.roles`, message: 'duplicate role' });
     // Instance roles come from the subject type's roles; a type with null roles takes none, so its instances use [].
     const subjectType = Array.isArray(subjects) ? subjects.find((t) => isPlainObject(t) && t.id === s.subject_id) : null;
+    const allowedRoles = subjectType && Array.isArray(subjectType.roles) ? subjectType.roles.map((r) => r?.role_id) : [];
     if (subjectType && Array.isArray(s.roles)) {
-      const allowed = Array.isArray(subjectType.roles) ? subjectType.roles.map((r) => r?.role_id) : [];
-      if (s.roles.length === 0 && allowed.length > 0)
+      if (s.roles.length === 0 && allowedRoles.length > 0)
         issues.push({ level: 'error', path: `${p}.roles`, message: `roles must list at least one role of subject type "${s.subject_id}"` });
       for (const role of new Set(s.roles))
-        if (!allowed.includes(role))
+        if (!allowedRoles.includes(role))
           issues.push({ level: 'error', path: `${p}.roles`, message: `role "${role}" is not in the roles of subject type "${s.subject_id}"` });
+    }
+    // Mirrors config.decode_level: initial_assignment references a continuous slot the subject can perform.
+    if (isPlainObject(s.initial_assignment)) {
+      const assignment = s.initial_assignment;
+      const assignedPath = `${p}.initial_assignment`;
+      if (typeof assignment.building_id === 'string' && !instanceIds.has(assignment.building_id))
+        issues.push({ level: 'error', path: `${assignedPath}.building_id`, message: `"${assignment.building_id}" must be a building instance ID in this level` });
+      if (subjectType && Array.isArray(s.roles) && !s.roles.includes(assignment.role_id))
+        issues.push({ level: 'error', path: `${assignedPath}.role_id`, message: `subject cannot perform role "${assignment.role_id}"; list it in the subject's roles` });
+      const assignedBuilding = instanceById.get(assignment.building_id);
+      const assignedType = assignedBuilding && typeById?.get(assignedBuilding.building_id);
+      if (assignedType) {
+        const rows = Array.isArray(assignedType.subject_roles) ? assignedType.subject_roles : [];
+        const slot = rows.some((row) => isPlainObject(row) && row.role_id === assignment.role_id && row.staffing_mode === 'continuous' && Number.isInteger(row.quantity) && row.quantity > 0);
+        if (!slot)
+          issues.push({ level: 'error', path: `${assignedPath}.role_id`, message: `"${assignment.building_id}" has no continuous slot for role "${assignment.role_id}"` });
+      }
     }
   });
   // Mirrors logic.initial_balance: Control Units and enable_at_start buildings start active,
@@ -578,7 +686,7 @@ export function validateShips(data, texts, subjects) {
     checkTextKey(ship.name_key, texts, `$[${i}].name_key`, issues);
     if (!validSpritePath(ship.sprite)) issues.push({ level: 'error', path: `$[${i}].sprite`, message: SPRITE_PATH_ERROR });
     for (const field of ['width', 'height']) if (!(Math.fround(ship[field]) > 0))
-      issues.push({ level: 'error', path: `$[${i}].${field}`, message: `${field} must be a positive world-unit dimension` });
+      issues.push({ level: 'error', path: `$[${i}].${field}`, message: `${field} must be a positive pixel dimension` });
     for (const field of ['max_speed_hours', 'units_per_hour']) {
       if (!(Math.fround(ship[field]) >= 0)) issues.push({ level: 'error', path: `$[${i}].${field}`, message: `${field} must be nonnegative (${field === 'units_per_hour' ? 'cargo units per simulated hour; zero disables dispatch' : 'acceleration/braking hours'})` });
     }
@@ -589,7 +697,7 @@ export function validateShips(data, texts, subjects) {
       if (!isPlainObject(row)) return;
       const path = `$[${i}].subjects[${j}]`;
       if (!Array.isArray(subjects) || !subjects.some((s) => s?.id === row.subject_id))
-        issues.push({ level: 'error', path: `${path}.subject_id`, message: 'subject_id must reference config/subjects.json' });
+        issues.push({ level: 'error', path: `${path}.subject_id`, message: 'subject_id must reference subjects.json' });
       if (!(Math.fround(row.capacity) >= 0))
         issues.push({ level: 'error', path: `${path}.capacity`, message: 'capacity must be nonnegative' });
       if (passengers.slice(0, j).some((previous) => previous?.subject_id === row.subject_id))

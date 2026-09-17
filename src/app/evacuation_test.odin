@@ -12,7 +12,7 @@ evacuation_cards_show_actual_boarding_and_correct_trip_direction :: proc(t: ^tes
     arena: mem.Dynamic_Arena
     mem.dynamic_arena_init(&arena,alignment=64)
     defer mem.dynamic_arena_destroy(&arena)
-    text, ok := localization.decode(transmute([]byte)#load("../../assets/localization/en.json"),mem.dynamic_arena_allocator(&arena))
+    text, ok := localization.decode(transmute([]byte)#load("../../assets/config/default/localization/en.json"),mem.dynamic_arena_allocator(&arena))
     testing.expect(t,ok)
     fleet := logic.Transport_State{count=1,station={name="Orbital"}}
     fleet.missions[0] = {evacuation=true,phase=.Outbound,destination="H",units=3,distance=100,travelled=20,handling_rate=2}

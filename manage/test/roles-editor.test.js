@@ -29,7 +29,7 @@ before(async () => {
 after(async () => { await server?.close(); });
 
 test('building roles show all catalog rows in a three-column table', () => {
-  const html = renderBuildingRoles([{ role_id: 'worker', quantity: 3, required: true }, { role_id: 'repairer', quantity: 1, required: false }]);
+  const html = renderBuildingRoles([{ role_id: 'worker', quantity: 3, staffing_mode: 'continuous' }, { role_id: 'repairer', quantity: 1, staffing_mode: 'on_demand' }]);
   assert.match(html, /class="panel building-subject-roles"/);
   assert.match(html, /class="building-roles-table"/);
   assert.equal((html.match(/scope="col"/g) ?? []).length, 3);
@@ -37,23 +37,23 @@ test('building roles show all catalog rows in a three-column table', () => {
   assert.match(html, /value="3"/);
   assert.equal((html.match(/>Quantity</g) ?? []).length, 1);
 });
-test('building required flag is a checkbox reflecting true and false without changing data', () => {
-  const required = renderBuildingRoles([{ role_id: 'worker', quantity: 1, required: true }]);
-  const optional = renderBuildingRoles([{ role_id: 'worker', quantity: 1, required: false }]);
-  assert.match(required, /type="checkbox" checked=""/);
-  assert.match(optional, /type="checkbox"/);
-  assert.doesNotMatch(optional, /checked=""/);
-  assert.doesNotMatch(required, /<option value="true">/);
+test('building staffing mode is a select reflecting both modes without changing data', () => {
+  const continuous = renderBuildingRoles([{ role_id: 'worker', quantity: 1, staffing_mode: 'continuous' }]);
+  const onDemand = renderBuildingRoles([{ role_id: 'worker', quantity: 1, staffing_mode: 'on_demand' }]);
+  assert.match(continuous, /<select[^>]*aria-label="worker: staffing mode"/);
+  assert.match(continuous, /<option value="continuous"[^>]*>Continuous<\/option>/);
+  assert.match(onDemand, /<option value="on_demand"[^>]*>On demand<\/option>/);
+  assert.doesNotMatch(continuous, /type="checkbox"/);
 });
 
 test('building roles retain malformed values and expose actionable errors', () => {
   assert.match(renderBuildingRoles(null), /Expected an array/);
   assert.match(renderBuildingRoles([]), /Not configured/);
   assert.match(renderBuildingRoles([null]), /unknown or malformed/);
-  const html = renderBuildingRoles([{ role_id: 'worker', quantity: -2, required: null }, { role_id: 'worker', quantity: 0, required: true }]);
+  const html = renderBuildingRoles([{ role_id: 'worker', quantity: -2, staffing_mode: null }, { role_id: 'worker', quantity: 0, staffing_mode: 'continuous' }]);
   assert.match(html, /Duplicate role/);
-  assert.match(html, /Expected a finite nonnegative quantity/);
-  assert.match(html, /Choose required or optional/);
+  assert.match(html, /Expected a nonnegative whole number of slots/);
+  assert.match(html, /Choose continuous or on demand/);
 });
 
 test('level map has bounded panels and a focusable sidebar without the Subjects editor', () => {
@@ -81,7 +81,7 @@ test('roles use the existing master-detail layout and render only selected prope
   assert.match(html, /class="panel list-panel"/);
   assert.match(html, /class="panel detail-panel"/);
   assert.match(html, /<h2>Worker<\/h2>/);
-  assert.equal((html.match(/>Sprite path</g) ?? []).length, 1);
+  assert.equal((html.match(/>Sprite path</g) ?? []).length, 0);
   assert.match(html, /disabled="">Add missing role/);
   assert.match(html, /aria-pressed="true"/);
   assert.match(html, /Move role 1 up/);

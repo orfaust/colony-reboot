@@ -146,11 +146,12 @@ shipped_station_loads :: proc(t: ^testing.T) {
     mem.dynamic_arena_init(&arena,alignment=64)
     defer mem.dynamic_arena_destroy(&arena)
     allocator := mem.dynamic_arena_allocator(&arena)
-    text_data :: #load("../../assets/localization/en.json")
+    text_data :: #load("../../assets/config/default/localization/en.json")
     text, text_ok := localization.decode(transmute([]byte)text_data,allocator)
     testing.expect(t,text_ok)
     // Exercises both new file paths through the production startup adapter.
-    catalog, _, ok := load(text.entries,allocator)
+    level_path := profile_path(DEFAULT_PROFILE, DEFAULT_LEVEL, allocator)
+    catalog, _, ok := load(text.entries,allocator,level_path)
     testing.expect(t,ok)
     testing.expect(t,len(catalog.space_stations) > 0)
     if len(catalog.space_stations) > 0 { testing.expect(t,catalog.space_stations[0].name != "") }

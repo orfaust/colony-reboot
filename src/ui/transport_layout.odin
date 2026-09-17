@@ -19,6 +19,13 @@ layout_transport_cards :: proc(state: ^Scene_State, input: c.Input, bounds: c.Re
     y := bounds.y-state.transport_pixel_scroll
     for &card in cards {
         card.bounds = {bounds.x,y,bounds.width,card.bounds.height}
+        if card.approve_id != 0 {
+            // Full button geometry; drawing is scissor-clipped and the click is
+            // accepted only inside the panel viewport.
+            card.approve_bounds = {card.bounds.x+card.bounds.width-40,card.bounds.y+card.bounds.height-36,32,32}
+        } else {
+            card.approve_bounds = {}
+        }
         if bounds.width > 0 && bounds.height > 0 && y < bounds.y+bounds.height && y+card.bounds.height > bounds.y { append(&visible,card) }
         y += card.bounds.height
     }

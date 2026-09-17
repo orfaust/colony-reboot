@@ -5,7 +5,7 @@ import "core:mem"
 import "core:os"
 import c "../contracts"
 
-KEY_BINDINGS_PATH :: "assets/config/key_bindings.json"
+KEY_BINDINGS_RELATIVE_PATH :: "key_bindings.json"
 
 // Structure only: every action needs at least one distinct input name. Whether a
 // name denotes a real key is checked by the renderer, which owns the key tables.
@@ -19,6 +19,7 @@ decode_key_bindings :: proc(data: []byte, allocator: mem.Allocator) -> (bindings
         {"activate", bindings.activate}, {"back", bindings.back}, {"select", bindings.select},
         {"zoom_in", bindings.zoom_in}, {"zoom_out", bindings.zoom_out}, {"pan", bindings.pan},
         {"speed_up", bindings.speed_up}, {"slow_down", bindings.slow_down},
+        {"overview_buildings", bindings.overview_buildings}, {"overview_subjects", bindings.overview_subjects},
     }
     for action in actions {
         if len(action.inputs) == 0 {
@@ -33,11 +34,12 @@ decode_key_bindings :: proc(data: []byte, allocator: mem.Allocator) -> (bindings
     return
 }
 
-load_key_bindings :: proc(allocator: mem.Allocator) -> (c.Key_Bindings, bool) {
-    data, ok := os.read_entire_file(KEY_BINDINGS_PATH)
-    if !ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", KEY_BINDINGS_PATH); return {}, false }
+load_key_bindings :: proc(allocator: mem.Allocator, profile: Profile = DEFAULT_PROFILE) -> (c.Key_Bindings, bool) {
+    path := profile_path(profile, KEY_BINDINGS_RELATIVE_PATH, allocator)
+    data, ok := os.read_entire_file(path)
+    if !ok { fmt.eprintf("Cannot read %s. Run from the repository root, or select another profile with --config <name>.\n", path); return {}, false }
     defer delete(data)
     bindings, error := decode_key_bindings(data, allocator)
-    if error != "" { fmt.eprintf("Invalid %s: %s\n", KEY_BINDINGS_PATH, error); return {}, false }
+    if error != "" { fmt.eprintf("Invalid %s: %s\n", path, error); return {}, false }
     return bindings, true
 }

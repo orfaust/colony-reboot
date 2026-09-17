@@ -2,23 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildingReferences, renameLevelBuilding, removeLevelBuilding, reorderLevelBuildings } from '../src/lib/level.js';
 
-const fixture = () => ({ buildings: [{ id: 'home' }, { id: 'work' }, { id: 'other' }], subjects: [{ id: 'person', residence: 'home', occupation: 'work' }] });
+const fixture = () => ({ buildings: [{ id: 'home' }, { id: 'work' }, { id: 'other' }], subjects: [{ id: 'person', residence: 'home', initial_assignment: { building_id: 'work', role_id: 'worker' } }] });
 test('building rename updates references atomically without mutating source', () => {
   const level = fixture();
   const renamed = renameLevelBuilding(level, 0, ' house ');
   assert.equal(renamed.subjects[0].residence, 'house');
   assert.equal(renamed.buildings[0].id, 'house');
   assert.equal(level.subjects[0].residence, 'home');
-  assert.equal(renameLevelBuilding(level, 1, 'job').subjects[0].occupation, 'job');
+  assert.equal(renameLevelBuilding(level, 1, 'job').subjects[0].initial_assignment.building_id, 'job');
   for (const id of ['', ' ', 'other', 'bad\0id']) assert.equal(renameLevelBuilding(level, 0, id), null);
 });
-test('deletion protects residences and clears optional occupations', () => {
+test('deletion protects residences and clears optional initial assignments', () => {
   const level = fixture();
   assert.equal(buildingReferences(level, 'home').residents.length, 1);
+  assert.equal(buildingReferences(level, 'work').workers.length, 1);
   assert.equal(removeLevelBuilding(level, 0), null);
   const removed = removeLevelBuilding(level, 1);
-  assert.equal(removed.subjects[0].occupation, null);
-  assert.equal(level.subjects[0].occupation, 'work');
+  assert.equal(removed.subjects[0].initial_assignment, null);
+  assert.equal(level.subjects[0].initial_assignment.building_id, 'work');
   assert.deepEqual(removed.buildings.map((b) => b.id), ['home', 'other']);
 });
 test('reordering preserves selection when either neighboring item moves', () => {

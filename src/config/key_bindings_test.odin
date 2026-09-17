@@ -4,12 +4,12 @@ import "core:mem"
 import "core:strings"
 import "core:testing"
 
-key_bindings_source :: #load("../../assets/config/key_bindings.json")
+key_bindings_source :: #load("../../assets/config/default/key_bindings.json")
 
 key_bindings_fixture :: string(`{"version":1,"menu_up":["key:up"],"menu_down":["key:down"],
 "activate":["key:enter","key:space"],"back":["key:escape"],"select":["mouse:left"],
 "zoom_in":["wheel:up"],"zoom_out":["wheel:down"],"pan":["mouse:right","mouse:middle"],
-"speed_up":["key:e"],"slow_down":["key:q"]}`)
+"speed_up":["key:e"],"slow_down":["key:q"],"overview_buildings":["key:b"],"overview_subjects":["key:s"]}`)
 
 @(test)
 key_bindings_validation :: proc(t: ^testing.T) {
@@ -32,6 +32,7 @@ key_bindings_validation :: proc(t: ^testing.T) {
         {"\"pan\":[\"mouse:right\",\"mouse:middle\"]","\"pan\":null"},
         {",\"back\":[\"key:escape\"]",""},
         {",\"slow_down\":[\"key:q\"]",""},
+        {",\"overview_subjects\":[\"key:s\"]",""},
     }
     for change in changes {
         modified, _ := strings.replace_all(key_bindings_fixture,change[0],change[1],allocator)

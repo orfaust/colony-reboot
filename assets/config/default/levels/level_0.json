@@ -3,7 +3,7 @@
   "level": 0,
   "space_station": {
     "station_id": "space_station_1",
-    "distance": 5000,
+    "distance": 5,
     "resources": [],
     "subjects": [
       {
@@ -293,11 +293,11 @@
       "stored": [
         {
           "resource_id": "water",
-          "amount": 0
+          "amount": 240
         },
         {
           "resource_id": "meals",
-          "amount": 0
+          "amount": 80
         },
         {
           "resource_id": "compost",

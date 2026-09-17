@@ -1,16 +1,18 @@
 package config
 
+import "core:fmt"
 import "core:mem"
 import "core:strings"
 import "core:testing"
 import "../localization"
 import "../logic"
+import c "../contracts"
 
-catalog_source :: #load("../../assets/config/buildings.json")
-resource_source :: #load("../../assets/config/resources.json")
-subject_source :: #load("../../assets/config/subjects.json")
-shipped_level_source :: #load("../../assets/levels/level_0.json")
-text_source :: #load("../../assets/localization/en.json")
+catalog_source :: #load("../../assets/config/default/buildings.json")
+resource_source :: #load("../../assets/config/default/resources.json")
+subject_source :: #load("../../assets/config/default/subjects.json")
+shipped_level_source :: #load("../../assets/config/default/levels/level_0.json")
+text_source :: #load("../../assets/config/default/localization/en.json")
 
 // Fixed mutation fixtures do not assume user-editable file contents or formatting.
 level_source :: string(`{"version":1,"level":0,"space_station":{"station_id":"test_station","distance":0,"resources":[],"subjects":[]},"buildings":[
@@ -27,8 +29,8 @@ building_fixture :: string(`[
 "code":"CU","sprite":"assets/sprites/buildings/control_unit.png","width":1.5,"height":1.5,"color":{"r":0,"g":86,"b":179},"power_need_kw":0,"power_output_kw":0,"always_on":true,"warmup_time":0,"cooldown_time":0,"min_operative_health":0,"materials_amount":0,
 "subject_roles":[],"residents":null,"needs":[],"produces":[],"storage":[]},
 {"id":"test_producer","name_key":"building_water_collector_name","description_key":"building_water_collector_description",
-"code":"CUSTOM","sprite":"assets/sprites/buildings/custom.png","width":2,"height":0.5,"color":{"r":20,"g":30,"b":40},"power_need_kw":3,"power_output_kw":16,"always_on":false,"warmup_time":0.5,"cooldown_time":1.25,
-"min_operative_health":0.6,"materials_amount":40,"subject_roles":[{"role_id":"supervisor","quantity":1,"required":true},{"role_id":"worker","quantity":2.5,"required":true},{"role_id":"repairer","quantity":0.5,"required":false}],
+"code":"CUSTOM","sprite":"assets/sprites/buildings/custom.png","width":2,"height":0.5,"color":{"r":20,"g":30,"b":40},"power_need_kw":0,"power_output_kw":16,"always_on":false,"warmup_time":0.5,"cooldown_time":1.25,
+"min_operative_health":0.6,"materials_amount":40,"subject_roles":[{"role_id":"supervisor","quantity":1,"staffing_mode":"continuous"},{"role_id":"worker","quantity":2,"staffing_mode":"continuous"},{"role_id":"repairer","quantity":1,"staffing_mode":"on_demand"}],
 "residents":{"type":"human","capacity":4},
 "needs":[{"resource_id":"water","amount_per_unit":2,"capacity":10}],"produces":[{"resource_id":"water","units_per_hour":50,"capacity":100}],"storage":[]}
 ]`)
@@ -52,10 +54,20 @@ shipped_configuration :: proc(t: ^testing.T) {
     if error != "" { return }
     subjects, subject_error := decode_subjects(transmute([]byte)subject_source,resources,texts,allocator)
     testing.expect(t,subject_error == "",subject_error)
+    // Configured human/robot defaults: runtime health uses exactly these rates.
+    human, robot: logic.Subject_Type
+    for subject in subjects { if subject.id == "human" { human = subject }; if subject.id == "robot" { robot = subject } }
+    testing.expect(t,human.health_rates == logic.Subject_Health_Rates{work_gain_per_hour=0.002,rest_gain_per_hour=0.01,extra_work_loss_per_hour=0.025,max_inactivity_loss_per_hour=0.012,inactivity_max_time=72,station_recovery_per_hour=0.04})
+    testing.expect(t,robot.health_rates == logic.Subject_Health_Rates{work_gain_per_hour=0.0015,rest_gain_per_hour=0.02,extra_work_loss_per_hour=0.015,max_inactivity_loss_per_hour=0.006,inactivity_max_time=120,station_recovery_per_hour=0.06})
+    testing.expect(t,human.min_work_health == 0.4 && human.min_colony_health == 0.1 && robot.min_work_health == 0.4 && robot.min_colony_health == 0.1)
+    testing.expect(t,len(human.needs) == 2 && len(robot.needs) == 1)
+    testing.expect(t,human.needs[0].satisfied_health_gain_per_hour == 0.001 && human.needs[0].max_shortage_health_loss_per_hour == 0.025)
+    testing.expect(t,human.needs[1].satisfied_health_gain_per_hour == 0.002 && human.needs[1].max_shortage_health_loss_per_hour == 0.012)
+    testing.expect(t,robot.needs[0].satisfied_health_gain_per_hour == 0.0015 && robot.needs[0].max_shortage_health_loss_per_hour == 0.020)
     catalog.subjects = subjects
     residents_error := validate_residents(catalog,allocator)
     testing.expect(t,residents_error == "",residents_error)
-    testing.expect(t,load_space_stations(&catalog,texts,allocator))
+    testing.expect(t,load_space_stations(&catalog,texts,allocator,DEFAULT_PROFILE))
     level, level_error := decode_level(transmute([]byte)shipped_level_source,catalog,allocator)
     testing.expect(t,level_error == "",level_error)
     if level_error != "" { return }
@@ -86,7 +98,7 @@ array_catalog_validation :: proc(t: ^testing.T) {
     testing.expect(t,definition.warmup_time == 0.5 && definition.cooldown_time == 1.25)
     testing.expect(t,!definition.always_on && catalog.buildings[0].always_on)
     testing.expect(t,definition.min_operative_health == 0.6 && definition.materials_amount == 40)
-    testing.expect(t,len(definition.subject_roles) == 3 && definition.subject_roles[0].quantity == 1 && definition.subject_roles[1].quantity == 2.5 && definition.subject_roles[2].quantity == 0.5 && !definition.subject_roles[2].required)
+    testing.expect(t,len(definition.subject_roles) == 3 && definition.subject_roles[0].quantity == 1 && definition.subject_roles[1].quantity == 2 && definition.subject_roles[2].quantity == 1 && definition.subject_roles[2].staffing_mode == .on_demand)
     testing.expect(t,definition.produces[0].capacity == 100 && definition.needs[0].capacity == 10)
     testing.expect(t,definition.residents.type == "human" && definition.residents.capacity == 4 && logic.hosts_residents(definition))
     testing.expect(t,!logic.hosts_residents(catalog.buildings[0]))
@@ -98,28 +110,13 @@ array_catalog_validation :: proc(t: ^testing.T) {
         need := hourly_catalog.buildings[1].needs[0]
         testing.expect(t,need.amount_per_hour == 4 && need.amount_per_unit == 0)
     }
-    per_resident, _ := strings.replace_all(building_fixture,"\"amount_per_unit\":2","\"amount_per_resident\":0.5",allocator)
-    resident_catalog, resident_error := decode_catalog(transmute([]byte)per_resident,resources,texts,allocator)
-    testing.expect(t,resident_error == "",resident_error)
-    if resident_error == "" {
-        need := resident_catalog.buildings[1].needs[0]
-        testing.expect(t,need.amount_per_resident == 0.5 && need.amount_per_unit == 0 && need.amount_per_hour == 0)
-    }
-    // amount_per_resident is only allowed on buildings with residents.
-    no_residents, _ := strings.replace_all(per_resident,"\"residents\":{\"type\":\"human\",\"capacity\":4}","\"residents\":null",allocator)
-    _, resident_need_error := decode_catalog(transmute([]byte)no_residents,resources,texts,allocator)
-    testing.expect(t,strings.contains(resident_need_error,"requires residents"),resident_need_error)
-    // Products may use amount_per_resident instead of units_per_hour, again only with residents.
-    resident_product, _ := strings.replace_all(building_fixture,"\"units_per_hour\":50","\"amount_per_resident\":0.25",allocator)
-    product_catalog, product_error := decode_catalog(transmute([]byte)resident_product,resources,texts,allocator)
-    testing.expect(t,product_error == "",product_error)
-    if product_error == "" {
-        product := product_catalog.buildings[1].produces[0]
-        testing.expect(t,product.amount_per_resident == 0.25 && product.units_per_hour == 0)
-    }
-    unhosted_product, _ := strings.replace_all(resident_product,"\"residents\":{\"type\":\"human\",\"capacity\":4}","\"residents\":null",allocator)
-    _, unhosted_error := decode_catalog(transmute([]byte)unhosted_product,resources,texts,allocator)
-    testing.expect(t,strings.contains(unhosted_error,"produces[0]: amount_per_resident requires residents"),unhosted_error)
+    per_resident, _ := strings.replace_all(building_fixture,"\"amount_per_unit\":2","\"amount_per_unit\":2,\"amount_per_resident\":0.5",allocator)
+    _, resident_need_error := decode_catalog(transmute([]byte)per_resident,resources,texts,allocator)
+    testing.expect(t,strings.contains(resident_need_error,"unknown field \"amount_per_resident\""),resident_need_error)
+    // The obsolete per-resident building product rate is rejected the same way.
+    resident_product, _ := strings.replace_all(building_fixture,"\"units_per_hour\":50","\"units_per_hour\":50,\"amount_per_resident\":0.25",allocator)
+    _, resident_product_error := decode_catalog(transmute([]byte)resident_product,resources,texts,allocator)
+    testing.expect(t,strings.contains(resident_product_error,"unknown field \"amount_per_resident\""),resident_product_error)
     // storage lists extra resources a building can hold.
     stocked, _ := strings.replace_all(building_fixture,"\"storage\":[]","\"storage\":[{\"resource_id\":\"water\",\"capacity\":5}]",allocator)
     storage_catalog, storage_error := decode_catalog(transmute([]byte)stocked,resources,texts,allocator)
@@ -149,7 +146,8 @@ array_catalog_validation :: proc(t: ^testing.T) {
         {"\"height\":0.5,",""}, {"\"width\":2","\"width\":null"},
         {"\"b\":179","\"b\":256"}, {"\"b\":179","\"b\":-1"},
         {"\"b\":179","\"b\":1.5"}, {"\"b\":179","\"b\":179,\"b\":0"},
-        {"\"power_need_kw\":3","\"power_need_kw\":-1"},
+        {"\"power_need_kw\":0","\"power_need_kw\":-1"},
+        {"\"power_need_kw\":0","\"power_need_kw\":3"}, // mixed producer/consumer is rejected
         {"\"power_output_kw\":16","\"power_output_kw\":1e100"},
         {"\"warmup_time\":0.5","\"warmup_time\":-1"},
         {"\"cooldown_time\":1.25","\"cooldown_time\":-0.5"},
@@ -166,8 +164,10 @@ array_catalog_validation :: proc(t: ^testing.T) {
         {"\"min_operative_health\":0.6,",""},
         {"\"materials_amount\":40","\"materials_amount\":-1"},
         {`"quantity":1`, `"quantity":-1`},
-        {`"quantity":2.5`, `"quantity":null`},
-        {`"quantity":0.5`, `"quantity":-0.5`},
+        {`"quantity":2`, `"quantity":1.5`}, // fractional slot counts are rejected
+        {`"quantity":2`, `"quantity":null`},
+        {`"staffing_mode":"on_demand"`, `"staffing_mode":"sometimes"`},
+        {`"staffing_mode":"on_demand"`, `"required":false`}, // legacy field is rejected
         {`"subject_roles":[],`, ""},
         {"\"capacity\":100","\"capacity\":-1"},
         {"\"capacity\":10}","\"capacity\":-1}"},
@@ -373,11 +373,174 @@ level_references_and_validation :: proc(t: ^testing.T) {
     inactive, _ := strings.replace_all(damaged,"\"health\":0.59,\"repairing\":false,\"enable_at_start\":true","\"health\":0.59,\"repairing\":false,\"enable_at_start\":false",allocator)
     _, inactive_error := decode_level(transmute([]byte)inactive,catalog,allocator)
     testing.expect(t,inactive_error == "",inactive_error)
-    for &definition in catalog.buildings { if definition.id == "test_producer" { definition.power_output_kw = 0 } }
+    // An enabled consumer without enough generation is a startup deficit. The decoded
+    // catalog is mutated in memory: decode_catalog would reject a mixed producer/consumer,
+    // but decode_level only evaluates the resulting initial network.
+    for &definition in catalog.buildings { if definition.id == "test_producer" { definition.power_output_kw = 0; definition.power_need_kw = 3 } }
     _, enabled_deficit := decode_level(transmute([]byte)enabled_level_fixture,catalog,allocator)
     testing.expect(t,strings.contains(enabled_deficit,"initial power demand"))
-    for &definition in catalog.buildings { if definition.id == "test_producer" { definition.power_output_kw = 16 } }
+    for &definition in catalog.buildings { if definition.id == "test_producer" { definition.power_output_kw = 16; definition.power_need_kw = 0 } }
     for &definition in catalog.buildings { if definition.id == "control_unit" { definition.power_need_kw = 1 } }
     _, deficit := decode_level(transmute([]byte)level_source,catalog,allocator)
     testing.expect(t,strings.contains(deficit,"initial power demand"))
+}
+
+@(private)
+repeat_need :: proc(count: int, single: string, allocator: mem.Allocator) -> string {
+    builder := strings.builder_make(allocator)
+    for i in 0..<count {
+        if i > 0 { strings.write_byte(&builder,',') }
+        strings.write_string(&builder,single)
+    }
+    return strings.to_string(builder)
+}
+
+@(test)
+subject_need_capacity_is_enforced :: proc(t: ^testing.T) {
+    arena: mem.Dynamic_Arena
+    mem.dynamic_arena_init(&arena,alignment=64)
+    defer mem.dynamic_arena_destroy(&arena)
+    allocator := mem.dynamic_arena_allocator(&arena)
+    texts := test_texts(allocator)
+    resources, _ := decode_resources(transmute([]byte)resource_fixture,texts,allocator)
+    single := `{"resource_id":"water","amount_per_hour":0.5,"shortage_alert_time":12,"shortage_max_time":6,"satisfied_health_gain_per_hour":0.001,"max_shortage_health_loss_per_hour":0.02}`
+    // Exactly NEED_SLOT_LIMIT needs still decode; the runtime stores them in fixed arrays.
+    at_limit, _ := strings.replace_all(subject_fixture,single,repeat_need(c.NEED_SLOT_LIMIT,single,allocator),allocator)
+    subjects, error := decode_subjects(transmute([]byte)at_limit,resources,texts,allocator)
+    testing.expect(t,error == "" && len(subjects[0].needs) == c.NEED_SLOT_LIMIT,error)
+    // A catalog that cannot be represented is rejected instead of silently truncated.
+    over, _ := strings.replace_all(subject_fixture,single,repeat_need(c.NEED_SLOT_LIMIT+1,single,allocator),allocator)
+    _, over_error := decode_subjects(transmute([]byte)over,resources,texts,allocator)
+    testing.expect(t,strings.contains(over_error,"at most"),over_error)
+}
+
+// Task-12 startup capacity: a level whose continuous staffing slots cannot fit the
+// fixed session table is rejected with an actionable message instead of truncated.
+@(test)
+startup_rejects_staffing_slot_overflow :: proc(t: ^testing.T) {
+    arena: mem.Dynamic_Arena
+    mem.dynamic_arena_init(&arena,alignment=64)
+    defer mem.dynamic_arena_destroy(&arena)
+    allocator := mem.dynamic_arena_allocator(&arena)
+    texts := test_texts(allocator)
+    resources, _ := decode_resources(transmute([]byte)resource_fixture,texts,allocator)
+    catalog, _ := decode_catalog(transmute([]byte)building_fixture,resources,texts,allocator)
+    stations := [?]logic.Space_Station{{id="test_station"}}
+    catalog.space_stations = stations[:]
+    // test_producer: supervisor 1 + worker quantity (both continuous). Exactly
+    // STAFFING_SLOT_LIMIT slots still decode.
+    for &definition in catalog.buildings {
+        if definition.id == "test_producer" { definition.subject_roles[1].quantity = logic.STAFFING_SLOT_LIMIT-1 }
+    }
+    _, at_limit := decode_level(transmute([]byte)enabled_level_fixture,catalog,allocator)
+    testing.expect(t,at_limit == "",at_limit)
+    // One slot past the table is rejected, never silently dropped.
+    for &definition in catalog.buildings {
+        if definition.id == "test_producer" { definition.subject_roles[1].quantity = logic.STAFFING_SLOT_LIMIT }
+    }
+    _, overflow := decode_level(transmute([]byte)enabled_level_fixture,catalog,allocator)
+    testing.expect(t,strings.contains(overflow,"continuous staffing slots exceed"),overflow)
+}
+
+// One building type with `count` distinct needed resources plus the matching level
+// instance with one stored entry each, so startup validation resolves exactly
+// `count` stock entries. Built in memory so the test is independent of the editable
+// catalog and always exercises the real fixed limit. JSON is assembled with writers
+// because Odin's fmt treats braces as Python-like placeholders.
+@(private)
+stock_entry_limit_fixture :: proc(count: int, allocator: mem.Allocator) -> (definitions: []logic.Building_Type, level_source: string) {
+    needs := make([]logic.Need,count,allocator)
+    entries := strings.builder_make(allocator)
+    for i in 0..<count {
+        resource_id := fmt.aprintf("limit_resource_%d",i,allocator=allocator)
+        needs[i] = {resource_id=resource_id,amount_per_hour=1,capacity=1}
+        if i > 0 { strings.write_string(&entries,",") }
+        strings.write_string(&entries,`{"resource_id":"`)
+        strings.write_string(&entries,resource_id)
+        strings.write_string(&entries,`","amount":0}`)
+    }
+    definitions = make([]logic.Building_Type,1,allocator)
+    definitions[0] = {id="bulk",needs=needs}
+    level := strings.builder_make(allocator)
+    strings.write_string(&level,`{"version":1,"level":0,"space_station":{"station_id":"test_station","distance":0,"resources":[],"subjects":[]},"buildings":[{"id":"B1","building_id":"bulk","position":{"x":0,"y":0},"health":1,"repairing":false,"enable_at_start":false,"stored":[`)
+    strings.write_string(&level,strings.to_string(entries))
+    strings.write_string(&level,`],"residents_amount":null}],"subjects":[]}`)
+    level_source = strings.to_string(level)
+    return
+}
+
+// Phase-1 runtime stock table: exactly STOCK_ENTRY_LIMIT resolved entries decode;
+// one more is rejected with an actionable message instead of being truncated.
+@(test)
+startup_rejects_stock_entry_overflow :: proc(t: ^testing.T) {
+    arena: mem.Dynamic_Arena
+    mem.dynamic_arena_init(&arena,alignment=64)
+    defer mem.dynamic_arena_destroy(&arena)
+    allocator := mem.dynamic_arena_allocator(&arena)
+    definitions, level_source := stock_entry_limit_fixture(logic.STOCK_ENTRY_LIMIT,allocator)
+    initial := []logic.Building_Instance{{id="B1",building_id="bulk"}}
+    testing.expect(t,logic.stock_entry_count(initial,definitions) == logic.STOCK_ENTRY_LIMIT)
+    stations := [?]logic.Space_Station{{id="test_station"}}
+    catalog := Catalog{buildings=definitions,space_stations=stations[:]}
+    _, at_limit := decode_level(transmute([]byte)level_source,catalog,allocator)
+    testing.expect(t,at_limit == "",at_limit)
+    // One entry past the fixed table is rejected, never silently dropped.
+    overflow_definitions, overflow_level := stock_entry_limit_fixture(logic.STOCK_ENTRY_LIMIT+1,allocator)
+    catalog.buildings = overflow_definitions
+    _, overflow := decode_level(transmute([]byte)overflow_level,catalog,allocator)
+    testing.expect(t,strings.contains(overflow,"resolved stock entries exceed the runtime limit"),overflow)
+}
+
+// Phase-2 startup validation: a building either produces or consumes power, an
+// always_on type must never consume, and a per-unit need requires the reference
+// product (the first `produces` entry) to have a positive rate.
+@(test)
+building_power_roles_and_reference_product_are_validated :: proc(t: ^testing.T) {
+    arena: mem.Dynamic_Arena
+    mem.dynamic_arena_init(&arena,alignment=64)
+    defer mem.dynamic_arena_destroy(&arena)
+    allocator := mem.dynamic_arena_allocator(&arena)
+    texts := test_texts(allocator)
+    resources, _ := decode_resources(transmute([]byte)resource_fixture,texts,allocator)
+    // test_producer produces 16 kW with a zero demand; a positive demand is rejected.
+    mixed, _ := strings.replace_all(building_fixture,"\"power_need_kw\":0,\"power_output_kw\":16","\"power_need_kw\":3,\"power_output_kw\":16",allocator)
+    _, mixed_error := decode_catalog(transmute([]byte)mixed,resources,texts,allocator)
+    testing.expect(t,strings.contains(mixed_error,"mutually exclusive"),mixed_error)
+    // An always_on type with a positive demand is rejected even without output.
+    always_on, _ := strings.replace_all(building_fixture,"\"always_on\":false","\"always_on\":true",allocator)
+    always_on, _ = strings.replace_all(always_on,"\"power_output_kw\":16","\"power_output_kw\":0",allocator)
+    always_on, _ = strings.replace_all(always_on,"\"power_need_kw\":0","\"power_need_kw\":3",allocator)
+    _, always_on_error := decode_catalog(transmute([]byte)always_on,resources,texts,allocator)
+    testing.expect(t,strings.contains(always_on_error,"always_on requires power_need_kw == 0"),always_on_error)
+    // A per-unit need without a reference product is rejected instead of silently
+    // resolving to zero flow.
+    no_products, _ := strings.replace_all(building_fixture,"\"produces\":[{\"resource_id\":\"water\",\"units_per_hour\":50,\"capacity\":100}]","\"produces\":[]",allocator)
+    _, no_product_error := decode_catalog(transmute([]byte)no_products,resources,texts,allocator)
+    testing.expect(t,strings.contains(no_product_error,"reference product"),no_product_error)
+}
+
+// Phase 3: the runtime keeps an unstocked resident need at full fulfillment instead
+// of starving the resident, and the gap is surfaced as an actionable startup
+// diagnostic. The diagnostic returns its gap count so the check is testable without
+// parsing stderr.
+@(test)
+unstocked_resident_needs_are_reported_once_per_gap :: proc(t: ^testing.T) {
+    storage := [?]logic.Storage{{resource_id="water",capacity=10}}
+    definitions := [?]logic.Building_Type{{id="home",residents={type="human",capacity=4},storage=storage[:]}}
+    needs := [?]logic.Subject_Need{{resource_id="water",amount_per_hour=1},{resource_id="meals",amount_per_hour=1}}
+    subjects := [?]logic.Subject_Type{{id="human",needs=needs[:]}}
+    catalog := Catalog{buildings=definitions[:],subjects=subjects[:]}
+    buildings := [?]logic.Building_Instance{{id="H1",building_id="home"}}
+    level := Level{buildings=buildings[:]}
+    // meals is not stocked by the residence: exactly one gap.
+    testing.expect(t,report_unstocked_resident_needs(level,catalog) == 1)
+    // A residence that stocks every need reports nothing.
+    full_storage := [?]logic.Storage{{resource_id="water",capacity=10},{resource_id="meals",capacity=10}}
+    full_definitions := [?]logic.Building_Type{{id="home",residents={type="human",capacity=4},storage=full_storage[:]}}
+    full_catalog := Catalog{buildings=full_definitions[:],subjects=subjects[:]}
+    testing.expect(t,report_unstocked_resident_needs(level,full_catalog) == 0)
+    // A building type that hosts no residents is never checked.
+    plain_definitions := [?]logic.Building_Type{{id="shed"}}
+    plain_catalog := Catalog{buildings=plain_definitions[:],subjects=subjects[:]}
+    testing.expect(t,report_unstocked_resident_needs(level,plain_catalog) == 0)
 }

@@ -11,12 +11,16 @@ LANDING_RANGE_KM :: f64(1)
 SUBJECT_WALK_SPEED :: f64(2) // World units per simulated hour; straight platform-to-home route.
 SUBJECT_LINE_SPACING :: f64(0.25)
 Transport_Phase :: enum {
+    // Ordinary immigration waits for a player decision; emergency paths never do.
+    Awaiting_Approval,
     Loading, Outbound, Waiting_Landing, Landing, Unloading,
     Taking_Off, Braking, Returning, Return_Unloading, Completed, Cancelled,
 }
 Transport :: struct {
+    id: u64, // Stable mission identity for approval; never a storage index.
     ship_id, subject_id, destination, platform_id: string,
     evacuation: bool, // Empty outbound pickup; Unloading phase boards colony residents.
+    medical: bool, // Identified medical patients; emergency ships only, station discharge is not stock.
     pickup_platform_id: string, // Required pad for an evacuation manifest.
     holding_platform_id: string, // Visual anchor only, never a platform reservation.
     landing_ticket: u64, // FIFO entry order, independent of dispatch/mission order.
@@ -49,6 +53,7 @@ Transport_State :: struct {
     missions: [TRANSPORT_LIMIT]Transport,
     count: int,
     next_landing_ticket: u64,
+    next_mission_id: u64,
 }
 new_transports :: proc(station: Space_Station, instance: Station_Instance, ships: []Ship, buildings: []Building_Instance, subjects: []Subject_Instance, allocator: mem.Allocator, building_types: []Building_Type = nil, subject_types: []Subject_Type = nil) -> Transport_State {
     state := Transport_State{station=station, ships=ships,allocator=allocator,building_types=building_types,subject_types=subject_types,
@@ -91,6 +96,7 @@ reset_transports :: proc(state: ^Transport_State, instance: Station_Instance, bu
     for mission in state.missions[:state.count] { delete(mission.manifest,state.allocator) }
     state.count = 0
     state.next_landing_ticket = 0
+    state.next_mission_id = 0
     state.missions = {}
     reset_runtime_subjects(state,buildings,subjects)
     for building, i in buildings {
@@ -104,8 +110,24 @@ reset_transports :: proc(state: ^Transport_State, instance: Station_Instance, bu
         state.evacuation_started[i] = false
     }
 }
+// Non-linear ship ramp: a jerk-limited S-curve (cubic smoothstep) replacing the
+// former constant-acceleration profile. `fraction` is elapsed/ramp_duration in
+// [0,1]. Velocity spans 0..1 with zero slope at both ends, and its integral over
+// the ramp is exactly 0.5, so ramp time, peak speed, distance and travel_duration
+// are unchanged - only the shape inside a ramp differs. Both acceleration and
+// braking reuse the same curve; deceleration mirrors it in time.
+ship_ramp_speed :: proc(fraction: f64) -> f64 {
+    x := clamp(fraction,0,1)
+    return x*x*(3-2*x)
+}
+ship_ramp_distance :: proc(fraction: f64) -> f64 {
+    x := clamp(fraction,0,1)
+    return x*x*x-0.5*x*x*x*x
+}
 // Symmetric accelerate/cruise/brake, including triangular short routes.
-// Zero ramp hours explicitly means instantaneous speed changes; never divide by zero.
+// The profile is non-linear but total ramp time and distance are shape-independent,
+// so durations match the constant-acceleration model. Zero ramp hours explicitly
+// means instantaneous speed changes; never divide by zero.
 travel_duration :: proc(distance, max_speed, max_speed_hours: f64) -> f64 {
     if distance <= 0 || max_speed <= 0 { return 0 }
     if max_speed_hours <= 0 { return distance/max_speed }
@@ -120,11 +142,12 @@ transport_position :: proc(mission: Transport) -> (distance, speed: f64) {
     if mission.max_speed_hours <= 0 { return min(mission.leg_distance,mission.max_speed*t), mission.max_speed }
     acceleration := mission.max_speed/mission.max_speed_hours
     ramp := min(mission.max_speed_hours,math.sqrt(mission.leg_distance/acceleration))
+    if ramp <= 0 { return mission.leg_distance, 0 }
     peak := acceleration*ramp
-    if t < ramp { return 0.5*acceleration*t*t, acceleration*t }
+    if t < ramp { return peak*ramp*ship_ramp_distance(t/ramp), peak*ship_ramp_speed(t/ramp) }
     if t > mission.duration-ramp {
         remaining := mission.duration-t
-        return mission.leg_distance-0.5*acceleration*remaining*remaining, acceleration*remaining
+        return mission.leg_distance-peak*ramp*ship_ramp_distance(remaining/ramp), peak*ship_ramp_speed(remaining/ramp)
     }
     return 0.5*peak*ramp + peak*(t-ramp), peak
 }
@@ -144,9 +167,32 @@ start_return :: proc(mission: ^Transport) {
     set_transport_phase(mission,.Returning,mission.duration)
 }
 @(private)
+// Assigns the stable id at insertion so every catalog dispatch path shares one
+// identity scheme and resetting the session restarts it deterministically.
+append_mission :: proc(state: ^Transport_State, mission: Transport) {
+    state.next_mission_id += 1
+    appended := mission
+    appended.id = state.next_mission_id
+    state.missions[state.count] = appended
+    state.count += 1
+}
+@(private)
 withdraw_transport :: proc(state: ^Transport_State, mission: ^Transport) {
     mission.requested = 0
     switch mission.phase {
+    case .Awaiting_Approval:
+        // Nobody boarded and no ship left: release the request without a return leg.
+        for index in mission.manifest {
+            subject := &state.subjects[index]
+            if subject.activity == .Reserved {
+                subject.activity = .Station
+                subject.residence = ""
+                for &stock in state.stock { if stock.subject_id == subject.subject_id { stock.units += 1; break } }
+            }
+        }
+        mission.units = mission.loaded
+        for &available in state.available { if available.ship_id == mission.ship_id { available.units += 1; break } }
+        set_transport_phase(mission,.Cancelled,0)
     case .Loading:
         // Unboarded people never left the station. Release their reservation now.
         for index in mission.manifest {
@@ -193,7 +239,12 @@ reconcile_transports :: proc(state: ^Transport_State, game: ^State) {
 // per-subject stepping reuses session storage. No event queues.
 dispatch_transports :: proc(state: ^Transport_State, game: ^State, definitions: []Building_Type) {
     reconcile_transports(state,game)
+    // Medical missions are re-targeted or cancelled before new dispatch so a disabled
+    // pickup pad never starves a held emergency ship.
+    reconcile_medical_missions(state,game)
     dispatch_evacuations(state,game)
+    dispatch_medical_evacuations(state,game)
+    dispatch_medical_returns(state)
     for building, i in game.buildings {
         if !game.active[i] || state.evacuation_pending[i] { continue }
         for definition in definitions {
@@ -218,7 +269,7 @@ dispatch_transports :: proc(state: ^Transport_State, game: ^State, definitions: 
                             manifest := make([]int,int(units),state.allocator)
                             manifest_count := 0
                             for &subject, index in state.subjects {
-                                if subject.subject_id != stock.subject_id || subject.activity != .Station { continue }
+                                if subject.subject_id != stock.subject_id || subject.activity != .Station || subject.medical != .None { continue }
                                 subject.activity = .Reserved
                                 subject.residence = building.id
                                 manifest[manifest_count] = index
@@ -232,9 +283,10 @@ dispatch_transports :: proc(state: ^Transport_State, game: ^State, definitions: 
                             if units == 0 { delete(manifest,state.allocator); break }
                             assert(manifest_count == len(manifest)) // Available stock is a cache of Station instances.
                             mission.handling_hours = handling_duration(units,mission.handling_rate)
-                            set_transport_phase(&mission,.Loading,mission.handling_hours)
-                            state.missions[state.count] = mission
-                            state.count += 1
+                            // Ordinary immigration is a proposal: it holds its reservation and
+                            // ship slot until the player approves the launch in the transport box.
+                            set_transport_phase(&mission,.Awaiting_Approval,0)
+                            append_mission(state,mission)
                             available.units -= 1
                             stock.units -= units
                             state.reserved[i] += units
@@ -245,6 +297,16 @@ dispatch_transports :: proc(state: ^Transport_State, game: ^State, definitions: 
             }
         }
     }
+}
+// Ordinary requests become active loading only on this explicit command. The
+// mission keeps its reservation, so approval never re-reserves or duplicates stock.
+approve_transport :: proc(state: ^Transport_State, id: u64) -> bool {
+    for &mission in state.missions[:state.count] {
+        if mission.id != id || mission.phase != .Awaiting_Approval { continue }
+        set_transport_phase(&mission,.Loading,mission.handling_hours)
+        return true
+    }
+    return false
 }
 // Active platforms are exclusive during descent, unloading and takeoff.
 // If none is available, hold at <=1 km without unloading or discarding passengers.
@@ -301,6 +363,7 @@ step_transports :: proc(state: ^Transport_State, game: ^State, definitions: []Bu
         remaining := f64(1)/TICKS_PER_HOUR
         for _ in 0..<16 {
             if mission.phase == .Completed || mission.phase == .Cancelled { break }
+            if mission.phase == .Awaiting_Approval { break } // Waiting for a player decision, not simulation time.
             if mission.phase == .Waiting_Landing {
                 if mission.landing_ticket == 0 {
                     state.next_landing_ticket += 1
@@ -315,7 +378,11 @@ step_transports :: proc(state: ^Transport_State, game: ^State, definitions: []Bu
                 if mission.evacuation { mission.holding_platform_id = mission.pickup_platform_id }
                 first := true
                 for other in state.missions[:state.count] {
-                    if other.phase == .Waiting_Landing && other.landing_ticket != 0 && other.landing_ticket < mission.landing_ticket && reserve_platform(state,game,other.pickup_platform_id) != "" { first = false; break }
+                    if other.phase != .Waiting_Landing || other.landing_ticket == 0 { continue }
+                    if !transport_lands_ahead(other,mission) { continue }
+                    if reserve_platform(state,game,other.pickup_platform_id) == "" { continue }
+                    first = false
+                    break
                 }
                 if !first { break }
                 platform := reserve_platform(state,game,mission.pickup_platform_id)
@@ -350,9 +417,12 @@ step_transports :: proc(state: ^Transport_State, game: ^State, definitions: []Bu
                 }
             case .Unloading:
                 total := complete ? mission.loaded : min(mission.loaded,f32(math.floor(mission.phase_elapsed*mission.handling_rate+1e-10)))
-                deliver_passengers(state,game,&mission,total)
+                // Medical patients and anonymous passengers deliver through different targets.
+                deliver := deliver_passengers
+                if mission.medical { deliver = deliver_medical_patients }
+                deliver(state,game,&mission,total)
                 if complete {
-                    deliver_passengers(state,game,&mission,mission.units)
+                    deliver(state,game,&mission,mission.units)
                     mission.arrived = true
                     mission.takeoff_start = 1
                     set_transport_phase(&mission,.Taking_Off,LANDING_HOURS)
@@ -364,10 +434,18 @@ step_transports :: proc(state: ^Transport_State, game: ^State, definitions: []Bu
                 mission.travelled = approach+(mission.distance-approach)*mission.landing_progress
                 if complete { start_return(&mission) }
             case .Braking:
-                acceleration := mission.max_speed/mission.max_speed_hours
-                t := mission.phase_elapsed
-                mission.travelled = min(mission.distance,mission.brake_start+mission.brake_speed*t-0.5*acceleration*t*t)
-                mission.speed = max(f64(0),mission.brake_speed-acceleration*t)
+                // Mirrored non-linear ramp from brake_speed to rest. Total stop
+                // distance still equals the constant-acceleration result
+                // (0.5*brake_speed*duration), so clearance and return start match.
+                ramp := mission.phase_duration
+                if ramp <= 0 {
+                    mission.travelled = min(mission.distance,mission.brake_start)
+                    mission.speed = 0
+                } else {
+                    remaining := max(f64(0),ramp-mission.phase_elapsed)
+                    mission.travelled = min(mission.distance,mission.brake_start+mission.brake_speed*ramp*(0.5-ship_ramp_distance(remaining/ramp)))
+                    mission.speed = max(f64(0),mission.brake_speed*ship_ramp_speed(remaining/ramp))
+                }
                 if complete { start_return(&mission) }
             case .Returning:
                 mission.elapsed = mission.phase_elapsed
@@ -391,14 +469,20 @@ step_transports :: proc(state: ^Transport_State, game: ^State, definitions: []Bu
                         subject.target = {}
                         subject.wait_hours = 0
                     }
-                    for &stock in state.stock { if stock.subject_id == subject.subject_id { stock.units += 1; break } }
+                    if mission.medical {
+                        // Identified station patient, never anonymous station stock.
+                        subject.medical = .Hospitalized
+                        subject.medical_reserved = false
+                    } else {
+                        for &stock in state.stock { if stock.subject_id == subject.subject_id { stock.units += 1; break } }
+                    }
                 }
                 mission.returned = total
                 if complete {
                     for &available in state.available { if available.ship_id == mission.ship_id { available.units += 1; break } }
                     set_transport_phase(&mission,mission.arrived ? .Completed : .Cancelled,0)
                 }
-            case .Waiting_Landing, .Completed, .Cancelled:
+            case .Waiting_Landing, .Completed, .Cancelled, .Awaiting_Approval:
             }
             if !complete { break }
         }
@@ -415,6 +499,7 @@ transport_eta :: proc(mission: Transport) -> f64 {
     if mission.evacuation && !mission.arrived { return -1 } // Individual arrival times may block pickup.
     left := max(f64(0),mission.phase_duration-mission.phase_elapsed)
     switch mission.phase {
+    case .Awaiting_Approval: return -1 // No ETA before the player approves the launch.
     case .Loading: return left+mission.duration+LANDING_HOURS+mission.handling_hours
     case .Outbound: return left+LANDING_HOURS+mission.handling_hours
     case .Landing: return left+mission.handling_hours

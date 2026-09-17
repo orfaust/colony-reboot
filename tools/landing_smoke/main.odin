@@ -17,7 +17,7 @@ main :: proc() {
     progress := [?]f64{0.15,0.5,1,0.5,0.15,0}
     ships := [?]logic.Ship{{id="test",color={240,170,40}}}
     fleet := logic.Transport_State{count=1}
-    pad := app.building_screen_bounds(app.DEFAULT_CAMERA,{0,1},{1,0.5},320,240)
+    pad := app.building_screen_bounds(app.DEFAULT_CAMERA,{0,1},{64,32},320,240)
     targets := [?]c.Building_Target{{id="LP",bounds=pad}}
     rl.BeginTextureMode(target)
     rl.ClearBackground({20,25,35,255})

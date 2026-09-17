@@ -19,6 +19,7 @@ import { GRID_SCHEMAS } from './lib/catalogGrid.js';
 import RawEditor from './components/RawEditor.jsx';
 import IssuesPanel from './components/IssuesPanel.jsx';
 import FilesMenu from './components/FilesMenu.jsx';
+import VersionMenu from './components/VersionMenu.jsx';
 
 const HISTORY_LIMIT = 200;
 const COALESCE_MS = 1200;
@@ -51,6 +52,8 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [docs, setDocs] = useState({});
   const [active, setActive] = useState(null);
+  const [profiles, setProfiles] = useState([]);
+  const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState('visual');
   const [status, setStatus] = useState(null);
   const docsRef = useRef(docs);
@@ -63,17 +66,84 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [status]);
 
-  const loadAll = useCallback(async (keepActive) => {
-    const { files } = await api.listFiles();
+  // Every document path is relative to the selected configuration version.
+  const loadAll = useCallback(async (version, keepActive = false) => {
+    const { files } = await api.listFiles(version);
     setFiles(files);
-    const loaded = await Promise.all(files.map(async (f) => [f.path, await api.readFile(f.path)]));
+    const loaded = await Promise.all(files.map(async (f) => [f.path, await api.readFile(version, f.path)]));
     setDocs(Object.fromEntries(loaded.map(([path, { text, mtime }]) => [path, makeDoc(text, mtime)])));
     setActive((current) => (keepActive && files.some((f) => f.path === current) ? current : (files[0]?.path ?? null)));
   }, []);
 
   useEffect(() => {
-    loadAll().catch((e) => flash(`Cannot load assets: ${e.message}`, 'error'));
+    (async () => {
+      const { profiles } = await api.listProfiles();
+      setProfiles(profiles);
+      const initial = profiles.some((entry) => entry.name === 'default') ? 'default' : profiles[0]?.name;
+      if (!initial) { flash('No configuration version found under assets/config.', 'error'); return; }
+      setProfile(initial);
+      await loadAll(initial);
+    })().catch((e) => flash(`Cannot load configuration versions: ${e.message}`, 'error'));
   }, [loadAll]);
+
+  // Drop every loaded document; callers set the destination version first.
+  const clearDocuments = () => {
+    setFiles([]);
+    setDocs({});
+    setActive(null);
+  };
+
+  /** Switching versions reloads every document; unsaved edits are never merged across them. */
+  const switchProfile = (name) => {
+    if (!name || name === profile) return;
+    if (Object.values(docsRef.current).some(isDirty) && !confirm(`Discard unsaved changes and switch to version "${name}"?`)) return;
+    setProfile(name);
+    clearDocuments();
+    setTab('visual');
+    loadAll(name)
+      .then(() => flash(`Version ${name} loaded`))
+      .catch((e) => flash(`Cannot load version ${name}: ${e.message}`, 'error'));
+  };
+
+  const refreshProfiles = async () => {
+    const { profiles } = await api.listProfiles();
+    setProfiles(profiles);
+    return profiles;
+  };
+
+  const createVersion = async () => {
+    if (Object.values(docsRef.current).some(isDirty)) { flash('Save or discard changes before creating a version.', 'error'); return; }
+    const raw = prompt(`New version name. It becomes a full copy of "${profile}":`, '');
+    if (raw === null) return;
+    const name = raw.trim();
+    try {
+      await api.createProfile(name, profile);
+      await refreshProfiles();
+      setProfile(name);
+      clearDocuments();
+      await loadAll(name);
+      flash(`Created version ${name}`);
+    } catch (e) {
+      flash(`Cannot create version: ${e.message}`, 'error');
+    }
+  };
+
+  const deleteVersion = async () => {
+    if (profile === 'default') return;
+    if (Object.values(docsRef.current).some(isDirty)) { flash('Save or discard changes before deleting a version.', 'error'); return; }
+    if (!confirm(`Delete version "${profile}" and every JSON file in it? This cannot be undone.`)) return;
+    try {
+      await api.deleteProfile(profile);
+      const profiles = await refreshProfiles();
+      const fallback = profiles.some((entry) => entry.name === 'default') ? 'default' : profiles[0]?.name;
+      setProfile(fallback ?? null);
+      clearDocuments();
+      if (fallback) await loadAll(fallback);
+      flash(`Deleted version ${profile}`);
+    } catch (e) {
+      flash(`Cannot delete version: ${e.message}`, 'error');
+    }
+  };
 
   const dirtyPaths = Object.keys(docs).filter((p) => isDirty(docs[p]));
 
@@ -133,7 +203,7 @@ export default function App() {
     const errors = issuesFor(path, docsRef.current).filter((i) => i.level === 'error').length;
     if (errors && !confirm(`${path} has ${errors} error(s) that the game loader will reject. Save anyway?`)) return;
     const text = formatJson(doc.data, doc.style);
-    const write = (force) => api.saveFile(path, text, doc.mtime, force);
+    const write = (force) => api.saveFile(profile, path, text, doc.mtime, force);
     try {
       let result;
       try {
@@ -152,7 +222,7 @@ export default function App() {
   const reload = async (path) => {
     if (isDirty(docs[path]) && !confirm(`Discard unsaved changes to ${path}?`)) return;
     try {
-      const { text, mtime } = await api.readFile(path);
+      const { text, mtime } = await api.readFile(profile, path);
       setDocs((all) => ({ ...all, [path]: makeDoc(text, mtime) }));
       flash(`Reloaded ${path} from disk`);
     } catch (e) {
@@ -167,12 +237,12 @@ export default function App() {
     const taken = new Set(files.map((f) => f.path));
     let n = 0;
     while (taken.has(`levels/level_${n}.json`)) n++;
-    const name = prompt('New level file name (inside assets/levels/):', `level_${n}.json`);
+    const name = prompt('New level file name (inside levels/ of this version):', `level_${n}.json`);
     if (!name) return;
     const path = `levels/${name.endsWith('.json') ? name : `${name}.json`}`;
     try {
-      await api.createFile(path, formatJson({ version: 1, level: n, buildings: [], subjects: [], space_station: syncStationInstance(null, station) }));
-      await loadAll(true);
+      await api.createFile(profile, path, formatJson({ version: 1, level: n, buildings: [], subjects: [], space_station: syncStationInstance(null, station) }));
+      await loadAll(profile, true);
       setActive(path);
       flash(`Created ${path}`);
     } catch (e) {
@@ -286,9 +356,17 @@ export default function App() {
             <span className="subtitle">Asset Manager</span>
           </div>
         </div>
+        <VersionMenu
+          profiles={profiles}
+          profile={profile}
+          dirty={dirtyPaths.length > 0}
+          onSwitch={switchProfile}
+          onCreate={createVersion}
+          onDelete={deleteVersion}
+        />
         <FilesMenu groups={groups} active={active} allIssues={allIssues} dirtyPaths={dirtyPaths} onSelect={setActive} onCreateLevel={createLevel} />
         <div className="btn-row">
-          <button type="button" className="btn" onClick={() => loadAll(true)} disabled={dirtyPaths.length > 0} title="Reload every file from disk">
+          <button type="button" className="btn" onClick={() => loadAll(profile, true)} disabled={dirtyPaths.length > 0} title="Reload every file from disk">
             ⟳ Rescan
           </button>
           <button type="button" className="btn primary" disabled={dirtyPaths.length === 0} onClick={() => dirtyPaths.forEach((p) => save(p))} title="Ctrl+Shift+S">

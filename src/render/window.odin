@@ -66,36 +66,32 @@ elapsed_seconds :: proc() -> f64 {return f64(rl.GetFrameTime())}
 Building_Draw :: struct {
 	bounds:                                    c.Rect,
 	color:                                     c.RGB,
-	code:                                      string,
     sprite:                                    string, // Borrowed preloaded asset path.
 	illuminated:                               bool, // Supplied by app; never inferred from command activity.
-	power_output, power_need, power_available: string,
 	level_bar:                                 c.Rect, // Screen bounds of the startup bar.
 	level:                                     f32, // Startup progress in [0,1], filled bottom-up.
 }
 
-// Description and borrowed code are consumed synchronously and never retained.
+// The sprite carries the building; no text is drawn over it.
 draw_scene :: proc(buildings: []Building_Draw, notice: c.Notice_View, hud: c.Hud_View, landings: []Landing_Draw = nil) {
 	rl.BeginDrawing()
 	defer rl.EndDrawing()
 	rl.ClearBackground(rl.BLACK)
+	draw_buildings(buildings)
+    draw_landings(landings)
+    draw_scene_overlays(notice,hud)
+}
+
+// Building passes reused by the game and the developer world capture.
+draw_buildings :: proc(buildings: []Building_Draw) {
 	for building in buildings {
 		r := building.bounds
 		color := building.color
         draw_sprite_or_color(r, building.sprite, color)
-		lines := [?]string {
-			building.code,
-			building.power_output,
-			building.power_need,
-			building.power_available,
-		}
-		draw_building_lines(r, lines[:], building_code_color(color))
-		// Overlay the whole building, including its text, with 50% black.
+		// Overlay the whole building with 50% black while it is not illuminated.
 		if !building.illuminated {rl.DrawRectangleRec({r.x, r.y, r.width, r.height}, {0, 0, 0, 128})}
 		draw_level_bar(building.level_bar, building.level)
 	}
-    draw_landings(landings)
-    draw_scene_overlays(notice,hud)
 }
 
 // Shared by the game and the opt-in visual smoke capture.
@@ -124,6 +120,9 @@ draw_scene_overlays :: proc(notice: c.Notice_View, hud: c.Hud_View) {
 		rl.DrawRectangleLinesEx({r.x, r.y, r.width, r.height}, 1, rl.GRAY)
 		draw_info_rows(r, hud.info_rows, hud.info_title_color)
 	}
+	// Overview toggles and their optional modal cover every other overlay.
+	draw_modal(hud.modal)
+	draw_modal_toggles(hud.toggles)
 }
 
 // Outside the building, so the inactive overlay never dims it. The fill moves as the
@@ -147,43 +146,6 @@ draw_hud :: proc(hud: c.Hud_View) {
     draw_info_lines(r, lines[:], {255,255,255})
 }
 
-// Largest size for building text; smaller buildings shrink it to fit.
-BUILDING_FONT_SIZE :: f32(28)
-BUILDING_LINE_GAP :: f32(2)
-
-// Fit the complete block, then center each line independently inside it.
-draw_building_lines :: proc(bounds: c.Rect, lines: []string, ink: c.RGB) {
-	font := current_font()
-	line_height := BUILDING_FONT_SIZE + BUILDING_LINE_GAP
-	width: f32
-	count: int
-	for line in lines {
-		if line == "" {continue}
-		text := strings.clone_to_cstring(line, context.temp_allocator)
-		measured := rl.MeasureTextEx(font, text, BUILDING_FONT_SIZE, 1)
-		width = max(width, measured.x)
-		count += 1
-	}
-	if count == 0 {return}
-	block, scale := fit_building_code(bounds, {width, f32(count) * line_height - BUILDING_LINE_GAP})
-	if scale <= 0 {return}
-	y := block.y
-	for line in lines {
-		if line == "" {continue}
-		text := strings.clone_to_cstring(line, context.temp_allocator)
-		measured := rl.MeasureTextEx(font, text, BUILDING_FONT_SIZE, 1)
-		rl.DrawTextEx(
-			font,
-			text,
-			{bounds.x + (bounds.width - measured.x * scale) / 2, y},
-			BUILDING_FONT_SIZE * scale,
-			scale,
-			{ink.r, ink.g, ink.b, 255},
-		)
-		y += line_height * scale
-	}
-}
-
 // Temporary C strings are released after drawing; no frame data is retained.
 draw :: proc(view: c.Menu_View) {
 	rl.BeginDrawing()
@@ -193,7 +155,8 @@ draw :: proc(view: c.Menu_View) {
 	title_width := measure_text(title, view.title_font_size)
 	r := view.title_bounds
 	draw_text(title, r.x + (r.width - title_width) / 2, r.y, view.title_font_size, rl.WHITE)
-	for button in view.buttons {
+	for i in 0..<view.button_count {
+		button := view.buttons[i]
 		r := button.bounds
 		color := rl.Color{180, 180, 180, 255}
 		if button.selected {

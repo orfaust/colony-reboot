@@ -4,7 +4,7 @@ export function buildingReferences(level, id) {
   const subjects = Array.isArray(level.subjects) ? level.subjects : [];
   return {
     residents: subjects.filter((s) => isPlainObject(s) && s.residence === id),
-    workers: subjects.filter((s) => isPlainObject(s) && s.occupation === id),
+    workers: subjects.filter((s) => isPlainObject(s) && isPlainObject(s.initial_assignment) && s.initial_assignment.building_id === id),
   };
 }
 
@@ -20,7 +20,11 @@ export function renameLevelBuilding(level, index, next) {
     ...level,
     buildings: level.buildings.map((b, i) => i === index ? { ...b, id: next } : b),
     subjects: Array.isArray(level.subjects) ? level.subjects.map((s) => !isPlainObject(s) || ambiguous ? s : {
-      ...s, residence: s.residence === old ? next : s.residence, occupation: s.occupation === old ? next : s.occupation,
+      ...s,
+      residence: s.residence === old ? next : s.residence,
+      initial_assignment: isPlainObject(s.initial_assignment) && s.initial_assignment.building_id === old
+        ? { ...s.initial_assignment, building_id: next }
+        : s.initial_assignment,
     }) : level.subjects,
   };
 }
@@ -34,7 +38,7 @@ export function removeLevelBuilding(level, index) {
   return {
     ...level,
     buildings: level.buildings.filter((_, i) => i !== index),
-    subjects: Array.isArray(level.subjects) ? level.subjects.map((s) => isPlainObject(s) && typeof id === 'string' && s.occupation === id ? { ...s, occupation: null } : s) : level.subjects,
+    subjects: Array.isArray(level.subjects) ? level.subjects.map((s) => isPlainObject(s) && typeof id === 'string' && isPlainObject(s.initial_assignment) && s.initial_assignment.building_id === id ? { ...s, initial_assignment: null } : s) : level.subjects,
   };
 }
 

@@ -6,7 +6,7 @@ import { newRole, roleLabel } from '../src/lib/roles.js';
 
 const roles = SUBJECT_ROLES.map(newRole);
 const texts = Object.fromEntries(roles.map((role) => [role.name_key, `Localized ${role.id}`]));
-const load = (path) => JSON.parse(readFileSync(new URL(`../../assets/${path}`, import.meta.url), 'utf8'));
+const load = (path) => JSON.parse(readFileSync(new URL(`../../assets/config/default/${path}`, import.meta.url), 'utf8'));
 
 test('role metadata defaults and editor routing use localized names', () => {
   assert.equal(detectKind(SUBJECT_ROLES_PATH), 'subject_roles');
@@ -19,19 +19,20 @@ test('role metadata defaults and editor routing use localized names', () => {
   assert.ok(refs.has('subject_role_worker_name'));
 });
 
-test('roles require every supported ID once, valid RGB, localization and sprite paths', () => {
+test('roles require every supported ID once, localization and no presentation data', () => {
   for (const data of [[], null, {}, [null], roles.slice(1), [...roles, roles[0]]]) assert.ok(validateRoles(data, texts).length);
   for (const patch of [
     { id: 'Worker' }, { id: '' }, { id: 'supervisor' }, { name_key: 'missing' },
-    { color: { r: -1, g: 0, b: 0 } }, { color: { r: 0, g: 256, b: 0 } }, { color: { r: 0, g: 0, b: 0.5 } },
-    { sprite: null }, { sprite: 42 }, { sprite: '../worker.png' }, { unknown: true },
+    { color: { r: 0, g: 0, b: 0 } }, { sprite: 'assets/sprites/roles/worker.png' }, { unknown: true },
   ]) assert.ok(validateRoles([{ ...roles[0], ...patch }, ...roles.slice(1)], texts).length, JSON.stringify(patch));
-  for (const key of ['id', 'name_key', 'color']) {
+  for (const key of ['id', 'name_key']) {
     const copy = structuredClone(roles);
     delete copy[0][key];
     assert.ok(validateRoles(copy, texts).length, key);
   }
   assert.ok(validateRoles(roles, { ...texts, [roles[0].name_key]: ' ' }).length);
+  // The role catalog stopped carrying presentation data in this iteration.
+  assert.deepEqual(roles.map((role) => Object.keys(role)), [['id', 'name_key'], ['id', 'name_key'], ['id', 'name_key']]);
 });
 
 test('building sprite is optional; nonempty path syntax agrees with Odin', () => {

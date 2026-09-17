@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TextInput } from './fields.jsx';
 
 /** Select existing assets; browsing never uploads files or changes JSON before confirmation. */
@@ -8,6 +8,10 @@ export default function PathInput({ value, onChange, ...props }) {
   const [selected, setSelected] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const hasPath = typeof value === 'string' && value.trim() !== '';
+  // A new path is a new attempt, not a permanent failure.
+  useEffect(() => setPreviewFailed(false), [value]);
   const browse = async () => {
     setSelected(typeof value === 'string' ? value : '');
     setError('');
@@ -26,6 +30,11 @@ export default function PathInput({ value, onChange, ...props }) {
     <div className="btn-row"><TextInput {...props} value={value} onChange={onChange} />
       <button type="button" className="btn tiny" onClick={browse} aria-label="Browse PNG asset paths">Browse…</button>
     </div>
+    {hasPath && <figure className="sprite-preview">
+      {previewFailed
+        ? <figcaption className="field-error" role="alert">Preview unavailable. Check the path or run python tools/build.py.</figcaption>
+        : <img src={`/api/image?path=${encodeURIComponent(value)}`} alt={`${props['aria-label'] ?? 'Sprite'} preview`} decoding="async" onError={() => setPreviewFailed(true)} />}
+    </figure>}
     <dialog ref={dialog} className="path-browser" aria-label="Browse PNG assets">
       <h3>Browse PNG assets</h3>
       <p className="hint">Select an existing asset. No files are uploaded or copied.</p>

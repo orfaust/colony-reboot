@@ -35,7 +35,7 @@ test('unknown references, unloaded data, reserved sources and dangling target re
   assert.match(planTranslationRename(docs, SHIPS_PATH, 'old_key', 'new_key').error, /outside declared/);
   docs = fixture(); docs[SHIPS_PATH].data.push({ name_key: 'new_key' });
   assert.match(planTranslationRename(docs, SHIPS_PATH, 'old_key', 'new_key').error, /already has references/);
-  docs = fixture(); docs['config/broken.json'] = { loadError: 'bad JSON' };
+  docs = fixture(); docs['broken.json'] = { loadError: 'bad JSON' };
   assert.match(planTranslationRename(docs, SHIPS_PATH, 'old_key', 'new_key').error, /Cannot inspect/);
   assert.match(planTranslationRename(fixture(), SHIPS_PATH, 'window_title', 'new_key').error, /game-code/);
 });

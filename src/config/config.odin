@@ -148,7 +148,7 @@ resource_exists :: proc(resources: []logic.Resource, id: string) -> bool {
 text_error :: proc(key: string, texts: map[string]string, allocator: mem.Allocator) -> string {
     value, ok := texts[key]
     if !ok || strings.trim_space(value) == "" || strings.contains(value, "\x00") {
-        return fmt.aprintf("localization key %q is missing or empty in assets/localization/en.json", key, allocator=allocator)
+        return fmt.aprintf("localization key %q is missing or empty in localization/en.json", key, allocator=allocator)
     }
     return ""
 }
@@ -182,10 +182,19 @@ decode_catalog :: proc(data: []byte, resources: []logic.Resource, texts: map[str
             }
         }
         if d.width <= 0 || d.height <= 0 {
-            return {}, fmt.aprintf("building %q: width and height must be positive world-unit dimensions", d.id, allocator=allocator)
+            return {}, fmt.aprintf("building %q: width and height must be positive pixel dimensions", d.id, allocator=allocator)
         }
         if d.power_need_kw < 0 || d.power_output_kw < 0 {
             return {}, fmt.aprintf("building %q: power values must be nonnegative kW", d.id, allocator=allocator)
+        }
+        // A building either produces or consumes power, never both: the load-shedding
+        // rule and the generator lock both assume a single role. `always_on` types
+        // additionally must never consume, because they can never be stopped.
+        if d.power_need_kw > 0 && d.power_output_kw > 0 {
+            return {}, fmt.aprintf("building %q: power_need_kw and power_output_kw are mutually exclusive; a building either produces or consumes power", d.id, allocator=allocator)
+        }
+        if d.always_on && d.power_need_kw > 0 {
+            return {}, fmt.aprintf("building %q: always_on requires power_need_kw == 0", d.id, allocator=allocator)
         }
         if d.warmup_time < 0 || d.cooldown_time < 0 {
             return {}, fmt.aprintf("building %q: warmup_time and cooldown_time must be nonnegative hours", d.id, allocator=allocator)
@@ -210,24 +219,23 @@ decode_catalog :: proc(data: []byte, resources: []logic.Resource, texts: map[str
         keys := [?]string{d.name_key, d.description_key}
         for key in keys { if err := text_error(key, texts, allocator); err != "" { return {}, err } }
         for need, i in d.needs {
-            // Shape validation guarantees only one amount is present; the other is zero.
-            if max(need.amount_per_unit, need.amount_per_hour, need.amount_per_resident) <= 0 || !resource_exists(catalog.resources, need.resource_id) {
-                return {}, fmt.aprintf("building %q needs[%d]: amount_per_unit, amount_per_hour, or amount_per_resident must be positive and resource_id must reference resources.json", d.id, i, allocator=allocator)
+            // Shape validation guarantees exactly one amount is present; the other is zero.
+            if max(need.amount_per_unit, need.amount_per_hour) <= 0 || !resource_exists(catalog.resources, need.resource_id) {
+                return {}, fmt.aprintf("building %q needs[%d]: amount_per_unit or amount_per_hour must be positive and resource_id must reference resources.json", d.id, i, allocator=allocator)
             }
             if need.capacity < 0 {
                 return {}, fmt.aprintf("building %q needs[%d]: capacity must be nonnegative", d.id, i, allocator=allocator)
             }
-            if need.amount_per_resident > 0 && !logic.hosts_residents(d) {
-                return {}, fmt.aprintf("building %q needs[%d]: amount_per_resident requires residents", d.id, i, allocator=allocator)
+            // The first product is the reference for every per-unit need; without it
+            // the ratio cannot be resolved and the need would silently consume nothing.
+            if need.amount_per_unit > 0 && (len(d.produces) == 0 || d.produces[0].units_per_hour <= 0) {
+                return {}, fmt.aprintf("building %q needs[%d]: amount_per_unit requires the first produces entry to have a positive units_per_hour (the reference product)", d.id, i, allocator=allocator)
             }
         }
         for product, i in d.produces {
-            // Shape validation guarantees only one rate is present; the other is zero.
-            if max(product.units_per_hour, product.amount_per_resident) <= 0 || !resource_exists(catalog.resources, product.resource_id) {
-                return {}, fmt.aprintf("building %q produces[%d]: units_per_hour or amount_per_resident must be positive and resource_id must reference resources.json", d.id, i, allocator=allocator)
-            }
-            if product.amount_per_resident > 0 && !logic.hosts_residents(d) {
-                return {}, fmt.aprintf("building %q produces[%d]: amount_per_resident requires residents", d.id, i, allocator=allocator)
+            // The only building product rate is `units_per_hour`; it must be positive.
+            if product.units_per_hour <= 0 || !resource_exists(catalog.resources, product.resource_id) {
+                return {}, fmt.aprintf("building %q produces[%d]: units_per_hour must be positive and resource_id must reference resources.json", d.id, i, allocator=allocator)
             }
             if product.capacity < 0 {
                 return {}, fmt.aprintf("building %q produces[%d]: capacity must be nonnegative", d.id, i, allocator=allocator)
@@ -260,7 +268,7 @@ decode_subjects :: proc(data: []byte, resources: []logic.Resource, texts: map[st
             return nil, fmt.aprintf("subjects[%d].sprite: expected a normalized assets/.../*.png path", i, allocator=allocator)
         }
         if subject.width <= 0 || subject.height <= 0 {
-            return nil, fmt.aprintf("subjects[%d]: width and height must be positive world-unit dimensions", i, allocator=allocator)
+            return nil, fmt.aprintf("subjects[%d]: width and height must be positive pixel dimensions", i, allocator=allocator)
         }
         for need, j in subject.needs {
             if need.amount_per_hour <= 0 || !resource_exists(resources, need.resource_id) {
@@ -272,9 +280,32 @@ decode_subjects :: proc(data: []byte, resources: []logic.Resource, texts: map[st
             if need.shortage_max_time < 0 {
                 return nil, fmt.aprintf("subject %q needs[%d]: shortage_max_time must be nonnegative hours", subject.id, j, allocator=allocator)
             }
+            if need.satisfied_health_gain_per_hour < 0 {
+                return nil, fmt.aprintf("subject %q needs[%d]: satisfied_health_gain_per_hour must be nonnegative", subject.id, j, allocator=allocator)
+            }
+            if need.max_shortage_health_loss_per_hour < 0 {
+                return nil, fmt.aprintf("subject %q needs[%d]: max_shortage_health_loss_per_hour must be nonnegative", subject.id, j, allocator=allocator)
+            }
         }
         if subject.rest_time < 0 || subject.work_time < 0 {
             return nil, fmt.aprintf("subject %q: rest_time and work_time must be nonnegative hours", subject.id, allocator=allocator)
+        }
+        if subject.extra_work_time < 0 {
+            return nil, fmt.aprintf("subject %q: extra_work_time must be nonnegative hours", subject.id, allocator=allocator)
+        }
+        // Runtime need state uses fixed per-subject storage; reject catalogs that
+        // cannot be represented instead of silently truncating needs.
+        if len(subject.needs) > c.NEED_SLOT_LIMIT {
+            return nil, fmt.aprintf("subject %q: at most %d needs are supported per subject type", subject.id, c.NEED_SLOT_LIMIT, allocator=allocator)
+        }
+        // Medical evacuation triggers below the work floor, and the work floor never exceeds full health.
+        if subject.min_colony_health < 0 || subject.min_work_health > 1 || subject.min_work_health <= subject.min_colony_health {
+            return nil, fmt.aprintf("subject %q: health thresholds must satisfy 0 <= min_colony_health < min_work_health <= 1", subject.id, allocator=allocator)
+        }
+        rates := subject.health_rates
+        if rates.work_gain_per_hour < 0 || rates.rest_gain_per_hour < 0 || rates.extra_work_loss_per_hour < 0 ||
+           rates.max_inactivity_loss_per_hour < 0 || rates.inactivity_max_time < 0 || rates.station_recovery_per_hour < 0 {
+            return nil, fmt.aprintf("subject %q: health_rates values must be finite nonnegative magnitudes", subject.id, allocator=allocator)
         }
         // A null roles decodes as an empty slice: the subject type takes no roles.
         for role, j in subject.roles {
@@ -302,7 +333,7 @@ validate_residents :: proc(catalog: Catalog, allocator: mem.Allocator) -> string
         known := false
         for subject in catalog.subjects { if subject.id == building.residents.type { known = true; break } }
         if !known {
-            return fmt.aprintf("building %q residents.type: %q must reference a subject ID in assets/config/subjects.json", building.id, building.residents.type, allocator=allocator)
+            return fmt.aprintf("building %q residents.type: %q must reference a subject ID defined in subjects.json", building.id, building.residents.type, allocator=allocator)
         }
     }
     return ""
@@ -314,35 +345,10 @@ find_building_instance :: proc(buildings: []logic.Building_Instance, id: string)
     return {}, false
 }
 
-@(private)
-building_instance_exists :: proc(buildings: []logic.Building_Instance, id: string) -> bool {
-    _, found := find_building_instance(buildings, id)
-    return found
-}
-
 // A building stores each resource it needs, produces, or lists in storage. A resource in
-// several lists has one stored entry, bounded by the largest capacity.
-@(private)
-stock_capacity :: proc(definition: logic.Building_Type, resource_id: string) -> (capacity: f32, found: bool) {
-    for need in definition.needs {
-        if need.resource_id != resource_id { continue }
-        capacity = found ? max(capacity, need.capacity) : need.capacity
-        found = true
-    }
-    for product in definition.produces {
-        if product.resource_id != resource_id { continue }
-        capacity = found ? max(capacity, product.capacity) : product.capacity
-        found = true
-    }
-    for stock in definition.storage {
-        if stock.resource_id != resource_id { continue }
-        capacity = found ? max(capacity, stock.capacity) : stock.capacity
-        found = true
-    }
-    return
-}
-
-@(private)
+// several lists has one stored entry, bounded by the largest capacity. Capacity
+// resolution is shared with the runtime stock table (logic.stock_capacity) so
+// startup validation and materialization agree on the bound.
 has_stock :: proc(stored: []logic.Stored_Resource, resource_id: string) -> bool {
     for stock in stored { if stock.resource_id == resource_id { return true } }
     return false
@@ -362,7 +368,7 @@ decode_level :: proc(data: []byte, catalog: Catalog, allocator: mem.Allocator) -
     for building, i in level.buildings {
         definition, found := find_building(catalog, building.building_id)
         if !found {
-            return {}, fmt.aprintf("buildings[%d]: unknown building_id %q; add its definition to assets/config/buildings.json", i, building.building_id, allocator=allocator)
+            return {}, fmt.aprintf("buildings[%d]: unknown building_id %q; add its definition to buildings.json", i, building.building_id, allocator=allocator)
         }
         if !logic.valid_instance(building) {
             return {}, fmt.aprintf("buildings[%d]: invalid instance; health must be in [0,1]", i, allocator=allocator)
@@ -373,7 +379,7 @@ decode_level :: proc(data: []byte, catalog: Catalog, allocator: mem.Allocator) -
                     return {}, fmt.aprintf("buildings[%d].stored[%d]: duplicate resource_id %q", i, j, stock.resource_id, allocator=allocator)
                 }
             }
-            capacity, stocked := stock_capacity(definition, stock.resource_id)
+            capacity, stocked := logic.stock_capacity(definition, stock.resource_id)
             if !stocked {
                 return {}, fmt.aprintf("buildings[%d].stored[%d]: resource_id %q is not needed, produced, or stored by %q", i, j, stock.resource_id, building.building_id, allocator=allocator)
             }
@@ -422,12 +428,22 @@ decode_level :: proc(data: []byte, catalog: Catalog, allocator: mem.Allocator) -
             if previous.id == building.id { return {}, fmt.aprintf("buildings[%d]: duplicate ID %q", i, building.id, allocator=allocator) }
         }
     }
+    // The session materializes one stable slot per continuous unit; a level that
+    // cannot fit the fixed slot table is rejected instead of silently truncated.
+    if slots := logic.continuous_slot_count(level.buildings,catalog.buildings); slots > logic.STAFFING_SLOT_LIMIT {
+        return {}, fmt.aprintf("level: %d continuous staffing slots exceed the runtime limit of %d", slots, logic.STAFFING_SLOT_LIMIT, allocator=allocator)
+    }
+    // The runtime stock table is fixed too: every resolved resource entry is
+    // materialized once, so an oversized level is rejected rather than truncated.
+    if entries := logic.stock_entry_count(level.buildings,catalog.buildings); entries > logic.STOCK_ENTRY_LIMIT {
+        return {}, fmt.aprintf("level: %d resolved stock entries exceed the runtime limit of %d", entries, logic.STOCK_ENTRY_LIMIT, allocator=allocator)
+    }
     for subject, i in level.subjects {
         subject_type: logic.Subject_Type
         type_found := false
         for definition in catalog.subjects { if definition.id == subject.subject_id { subject_type = definition; type_found = true; break } }
         if !type_found {
-            return {}, fmt.aprintf("subjects[%d]: unknown subject_id %q; add its definition to assets/config/subjects.json", i, subject.subject_id, allocator=allocator)
+            return {}, fmt.aprintf("subjects[%d]: unknown subject_id %q; add its definition to subjects.json", i, subject.subject_id, allocator=allocator)
         }
         for previous in level.subjects[:i] {
             if previous.id == subject.id { return {}, fmt.aprintf("subjects[%d]: duplicate ID %q", i, subject.id, allocator=allocator) }
@@ -447,9 +463,37 @@ decode_level :: proc(data: []byte, catalog: Catalog, allocator: mem.Allocator) -
         if f32(residents) > host.residents.capacity {
             return {}, fmt.aprintf("subjects[%d]: residence %q exceeds its residents.capacity (%v)", i, subject.residence, host.residents.capacity, allocator=allocator)
         }
-        // A null occupation decodes as "": the subject is not working anywhere.
-        if subject.occupation != "" && !building_instance_exists(level.buildings, subject.occupation) {
-            return {}, fmt.aprintf("subjects[%d]: occupation %q must be null or reference a building instance ID in this level", i, subject.occupation, allocator=allocator)
+        // Health is individual session state in [0,1]; generated residents default to 1.
+        if subject.health < 0 || subject.health > 1 {
+            return {}, fmt.aprintf("subjects[%d].health: must be in [0,1]", i, allocator=allocator)
+        }
+        // A null initial_assignment decodes as an empty building_id: no initial shift.
+        if subject.initial_assignment.building_id != "" {
+            assignment := subject.initial_assignment
+            assigned_building, assigned_found := find_building_instance(level.buildings, assignment.building_id)
+            if !assigned_found {
+                return {}, fmt.aprintf("subjects[%d].initial_assignment.building_id: %q must reference a building instance ID in this level", i, assignment.building_id, allocator=allocator)
+            }
+            role_allowed := false
+            for role in subject.roles { if role == assignment.role_id { role_allowed = true; break } }
+            if !role_allowed {
+                return {}, fmt.aprintf("subjects[%d].initial_assignment.role_id: subject cannot perform this role; list it in the subject's roles", i, allocator=allocator)
+            }
+            assigned_type, _ := find_building(catalog, assigned_building.building_id)
+            if !logic.has_continuous_slot(assigned_type, assignment.role_id) {
+                return {}, fmt.aprintf("subjects[%d].initial_assignment: %q has no continuous slot for role %v", i, assignment.building_id, assignment.role_id, allocator=allocator)
+            }
+            // The level format has no explicit slot index: subjects fill consecutive
+            // slots of the same building role in level order. More assignments than
+            // slots are rejected because two people cannot share one slot.
+            quantity := logic.continuous_role_quantity(assigned_type,assignment.role_id)
+            taken := 0
+            for previous in level.subjects[:i] {
+                if previous.initial_assignment.building_id == assignment.building_id && previous.initial_assignment.role_id == assignment.role_id { taken += 1 }
+            }
+            if taken >= quantity {
+                return {}, fmt.aprintf("subjects[%d].initial_assignment: all %d continuous %v slots of %q are already assigned", i, quantity, assignment.role_id, assignment.building_id, allocator=allocator)
+            }
         }
         if subject.speed <= 0 { return {}, fmt.aprintf("subjects[%d]: speed must be positive", i, allocator=allocator) }
         // Instance roles come from the subject type's roles; a type with null roles takes none, so its instances use [].
@@ -476,23 +520,52 @@ decode_level :: proc(data: []byte, catalog: Catalog, allocator: mem.Allocator) -
     return
 }
 
-load :: proc(texts: map[string]string, allocator: mem.Allocator, level_path: string = "assets/levels/level_0.json") -> (Catalog, Level, bool) {
-    resources_path :: "assets/config/resources.json"
+// Non-fatal startup diagnostic for resident buildings that cannot stock a need of
+// the subject type they host. The runtime keeps an unstocked need at full
+// fulfillment (see `logic.step_need_fulfillment`), so a level without a stocked
+// supply keeps working instead of silently starving its residents, but the gap must
+// not stay silent. Developer-only console text, never UI; reported once per load and
+// returns the number of gaps so callers can test the check without parsing stderr.
+report_unstocked_resident_needs :: proc(level: Level, catalog: Catalog) -> int {
+    reported := 0
+    for building in level.buildings {
+        definition, found := find_building(catalog, building.building_id)
+        if !found || !logic.hosts_residents(definition) { continue }
+        for subject in catalog.subjects {
+            if subject.id != definition.residents.type { continue }
+            for need in subject.needs {
+                if _, stocked := logic.stock_capacity(definition, need.resource_id); !stocked {
+                    fmt.eprintf("Configuration diagnostic: building %q (%s) hosts residents of type %q but resolves no stock entry for %q; their %q need stays at full fulfillment and draws nothing from stock.\n",
+                        building.id, building.building_id, subject.id, need.resource_id, subject.id)
+                    reported += 1
+                }
+            }
+        }
+    }
+    return reported
+}
+
+// Loads one complete configuration profile. `level_path` is the repository-relative
+// path of the level file to load (it may live outside the profile, as reload tests
+// do); every other file comes from `profile`. All diagnostics name the file they
+// reject so a profile mix-up is visible without debugging.
+load :: proc(texts: map[string]string, allocator: mem.Allocator, level_path: string, profile: Profile = DEFAULT_PROFILE) -> (Catalog, Level, bool) {
+    resources_path := profile_path(profile, "resources.json", allocator)
     resource_data, resource_ok := os.read_entire_file(resources_path)
-    if !resource_ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", resources_path); return {}, {}, false }
+    if !resource_ok { fmt.eprintf("Cannot read %s. Run from the repository root, or select another profile with --config <name>.\n", resources_path); return {}, {}, false }
     defer delete(resource_data)
     resources, resource_error := decode_resources(resource_data, texts, allocator)
     if resource_error != "" { fmt.eprintf("Invalid %s: %s\n", resources_path, resource_error); return {}, {}, false }
-    catalog_path :: "assets/config/buildings.json"
+    catalog_path := profile_path(profile, "buildings.json", allocator)
     data, ok := os.read_entire_file(catalog_path)
-    if !ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", catalog_path); return {}, {}, false }
+    if !ok { fmt.eprintf("Cannot read %s. Run from the repository root, or select another profile with --config <name>.\n", catalog_path); return {}, {}, false }
     defer delete(data)
     catalog, error := decode_catalog(data, resources, texts, allocator)
     if error != "" { fmt.eprintf("Invalid %s: %s\n", catalog_path, error); return {}, {}, false }
-    if !load_roles(&catalog, texts, allocator) { return {}, {}, false }
-    subjects_path :: "assets/config/subjects.json"
+    if !load_roles(&catalog, texts, allocator, profile) { return {}, {}, false }
+    subjects_path := profile_path(profile, "subjects.json", allocator)
     subject_data, subject_ok := os.read_entire_file(subjects_path)
-    if !subject_ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", subjects_path); return {}, {}, false }
+    if !subject_ok { fmt.eprintf("Cannot read %s. Run from the repository root, or select another profile with --config <name>.\n", subjects_path); return {}, {}, false }
     defer delete(subject_data)
     subjects, subject_error := decode_subjects(subject_data, resources, texts, allocator)
     if subject_error != "" { fmt.eprintf("Invalid %s: %s\n", subjects_path, subject_error); return {}, {}, false }
@@ -501,11 +574,13 @@ load :: proc(texts: map[string]string, allocator: mem.Allocator, level_path: str
         fmt.eprintf("Invalid %s: %s\n", catalog_path, residents_error)
         return {}, {}, false
     }
-    if !load_space_stations(&catalog, texts, allocator) { return {}, {}, false }
+    if !load_space_stations(&catalog, texts, allocator, profile) { return {}, {}, false }
     level_data, level_ok := os.read_entire_file(level_path)
     if !level_ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", level_path); return {}, {}, false }
     defer delete(level_data)
     level, level_error := decode_level(level_data, catalog, allocator)
     if level_error != "" { fmt.eprintf("Invalid %s: %s\n", level_path, level_error); return {}, {}, false }
+    // Loading succeeds either way: the diagnostic explains a gap the runtime absorbs.
+    report_unstocked_resident_needs(level, catalog)
     return catalog, level, true
 }

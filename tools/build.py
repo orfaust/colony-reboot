@@ -94,9 +94,11 @@ def sprite_fields(value, location='$'):
 def validate_assets(root=ROOT):
     root = Path(root).resolve()
     checked = set()
-    sources = sorted((root / 'assets/config').rglob('*.json')) + sorted((root / 'assets/levels').rglob('*.json'))
+    # Every configuration profile under assets/config is validated: catalogs, levels and
+    # localization alike, including profiles created only for experiments.
+    sources = sorted((root / 'assets/config').rglob('*.json'))
     if not sources:
-        raise ValueError('no asset configuration JSON found under assets/config or assets/levels')
+        raise ValueError('no asset configuration JSON found under assets/config')
     for source in sources:
         try:
             document = json.loads(source.read_text(encoding='utf-8'))

@@ -120,7 +120,11 @@ notice_panel_stays_at_bottom_on_resize :: proc(t: ^testing.T) {
     for size in sizes {
         view := notice_view(&state,size[0],size[1])
         testing.expect(t, view.bounds.y+view.bounds.height == size[1]-16)
-        testing.expect(t, view.bounds.x == 16 && view.bounds.width == size[0]-32)
+        // The notice panel leaves the bottom-right column free for the overview toggles.
+        testing.expect(t, view.bounds.x == 16 && view.bounds.width == notice_panel_width(size[0]))
+        toggles := modal_toggle_bounds(size[0],size[1])
+        testing.expect(t, toggles[0].x >= view.bounds.x+view.bounds.width)
+        testing.expect(t, toggles[1].x+toggles[1].width <= size[0]-16)
         for line in view.lines[:view.count] {
             testing.expect(t, line.bounds.y >= view.bounds.y)
             testing.expect(t, line.bounds.y+line.bounds.height <= view.bounds.y+view.bounds.height)

@@ -3,6 +3,7 @@ export const KEY_DEFAULTS = {
   version: 1, menu_up: ['key:up'], menu_down: ['key:down'], activate: ['key:enter', 'key:space'],
   back: ['key:escape'], select: ['mouse:left'], zoom_in: ['wheel:up'], zoom_out: ['wheel:down'],
   pan: ['mouse:right', 'mouse:middle'], speed_up: ['key:e'], slow_down: ['key:q'],
+  overview_buildings: ['key:b'], overview_subjects: ['key:s'],
 };
 const keys = `apostrophe comma minus period slash zero one two three four five six seven eight nine semicolon equal
 left_bracket backslash right_bracket grave space escape enter tab backspace insert delete right left down up page_up page_down home end
@@ -15,7 +16,7 @@ export function normalizeInput(value) {
   const colon = value.indexOf(':');
   return value.slice(0, colon + 1) + value.slice(colon + 1).toLowerCase();
 }
-export const newShip = (id) => ({ id, code: id.toUpperCase(), color: { r: 200, g: 200, b: 200 }, name_key: `ship_${id}_name`, type: 'transport', sprite: '', width: 1, height: 1, max_speed: 0, max_speed_hours: 1, units_per_hour: 0.25, subjects: [] });
+export const newShip = (id) => ({ id, code: id.toUpperCase(), color: { r: 200, g: 200, b: 200 }, name_key: `ship_${id}_name`, type: 'transport', sprite: '', width: 64, height: 64, max_speed: 0, max_speed_hours: 1, units_per_hour: 0.25, subjects: [] });
 export const newStation = (id = 'space_station') => ({ id, code: id.toUpperCase(), name_key: `${id}_name`, resources: [], subjects: [], ships: [] });
 export const newStock = (field, id) => field === 'ships' ? { ship_id: id, units: 0 } : { [field === 'resources' ? 'resource_id' : 'subject_id']: id, capacity: 100 };
 

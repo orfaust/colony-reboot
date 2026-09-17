@@ -215,8 +215,9 @@ function MapCanvas({ instances, types, texts, selected, onSelect, onMove, onKeyD
         {instances.map((b, index) => {
           if (!isPlainObject(b)) return null;
           const type = types.get(b.building_id);
-          const w = (type?.width > 0 ? type.width : 1) * view.scale;
-          const h = (type?.height > 0 ? type.height : 1) * view.scale;
+          // Catalog dimensions are pixels; the map works in world units (64 px each).
+          const w = (type?.width > 0 ? type.width / WORLD_SCALE : 1) * view.scale;
+          const h = (type?.height > 0 ? type.height / WORLD_SCALE : 1) * view.scale;
           const [sx, sy] = toScreen(b.position?.x ?? 0, b.position?.y ?? 0);
           const color = type?.color ?? { r: 255, g: 0, b: 255 };
           const isSelected = selected === index;
@@ -249,7 +250,7 @@ function MapCanvas({ instances, types, texts, selected, onSelect, onMove, onKeyD
   );
 }
 
-/** Subjects of the level; residence and occupation pick building instance ids of this level. */
+/** Subjects of the level; residence and initial_assignment pick building instance ids of this level. */
 export default function LevelEditor(props) {
   if (!isPlainObject(props.data)) return <p className="callout error">Expected a level object. Repair it in the JSON tab.</p>;
   if (!Array.isArray(props.data.buildings)) return <p className="callout error">Expected a buildings array. Repair it in the JSON tab.</p>;
@@ -311,7 +312,7 @@ function LevelForm({ data, onChange, ctx }) {
       setActionError(`Move ${refs.residents.length} resident(s) to another residence before deleting this building.`);
       return;
     }
-    if (!confirm(`Delete building "${instances[index]?.id}"?${refs.workers.length ? ` ${refs.workers.length} occupation(s) will become unassigned.` : ''}`)) return;
+    if (!confirm(`Delete building "${instances[index]?.id}"?${refs.workers.length ? ` ${refs.workers.length} initial assignment(s) will become unassigned.` : ''}`)) return;
     const next = removeLevelBuilding(data, index);
     if (!next) return;
     onChange(next);

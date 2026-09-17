@@ -10,7 +10,7 @@ inspector_text_is_required_and_validated :: proc(t: ^testing.T) {
     mem.dynamic_arena_init(&arena, alignment=64)
     defer mem.dynamic_arena_destroy(&arena)
     allocator := mem.dynamic_arena_allocator(&arena)
-    text, ok := decode(transmute([]byte)#load("../../assets/localization/en.json"), allocator)
+    text, ok := decode(transmute([]byte)#load("../../assets/config/default/localization/en.json"), allocator)
     testing.expect(t, ok)
     for key in INSPECTOR_LABEL_KEYS {
         original := text.entries[key]

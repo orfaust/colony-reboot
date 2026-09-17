@@ -10,7 +10,7 @@ localized_power_values :: proc(t: ^testing.T) {
     mem.dynamic_arena_init(&arena, alignment=64)
     defer mem.dynamic_arena_destroy(&arena)
     context.temp_allocator = mem.dynamic_arena_allocator(&arena)
-    source :: #load("../../assets/localization/en.json")
+    source :: #load("../../assets/config/default/localization/en.json")
     text, ok := localization.decode(transmute([]byte)source, context.temp_allocator)
     testing.expect(t, ok)
     testing.expect(t, power_text(text.power_output_format,16) == "+16 kW")

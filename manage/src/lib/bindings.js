@@ -17,6 +17,10 @@ export const BINDING_GROUPS = [
     { id: 'speed_up', label: 'Speed up', hint: 'Increase simulation speed.' },
     { id: 'slow_down', label: 'Slow down', hint: 'Decrease simulation speed.' },
   ] },
+  { title: 'Overview panels', actions: [
+    { id: 'overview_buildings', label: 'Buildings overview', hint: 'Toggle the buildings overview panel.' },
+    { id: 'overview_subjects', label: 'Subjects overview', hint: 'Toggle the subjects overview panel.' },
+  ] },
 ];
 export const DEVICE_LABELS = { key: 'Keyboard', mouse: 'Mouse', wheel: 'Wheel' };
 export const inputLabel = (input) => input.split(':').pop().replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());

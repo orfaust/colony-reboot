@@ -4,9 +4,12 @@ import "core:testing"
 
 @(test)
 always_on_prevents_shutdown_for_every_instance_and_survives_reset :: proc(t: ^testing.T) {
+    // always_on requires power_need_kw == 0 at startup because such a building can
+    // never be stopped; the fixture keeps a companion generator so the network has
+    // real output and an ordinary consumer for the power comparison.
     definitions := [?]Building_Type{
         {id="control_unit",power_output_kw=10},
-        {id="landing_platform",always_on=true,power_need_kw=2,cooldown_time=1,min_operative_health=0.5},
+        {id="landing_platform",always_on=true,cooldown_time=1,min_operative_health=0.5},
         {id="ordinary",power_need_kw=1},
     }
     initial := [?]Building_Instance{
@@ -26,7 +29,7 @@ always_on_prevents_shutdown_for_every_instance_and_survives_reset :: proc(t: ^te
             testing.expect(t,after.active && after.energized && after.level == before.level)
             testing.expect(t,after.power_need_kw == before.power_need_kw)
         }
-        testing.expect(t,balance(&state).consumed_kw == 5)
+        testing.expect(t,balance(&state).consumed_kw == 1)
         testing.expect(t,toggle(&state,{id="O"}) == .Applied)
         testing.expect(t,toggle(&state,{id="CU"}) == .Control_Unit_Locked)
         reset(&state,initial[:])

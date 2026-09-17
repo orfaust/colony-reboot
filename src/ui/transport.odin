@@ -14,3 +14,15 @@ transport_visible :: proc(bounds: c.Rect) -> int {
     if bounds.height <= 0 { return 0 }
     return max(1,int(bounds.height/c.TRANSPORT_CARD_HEIGHT))
 }
+
+// Approval is its own command inside the panel: overlay consumption already keeps
+// the click away from world selection, and only the panel-visible button area counts.
+approve_command :: proc(input: c.Input, cards: []c.Transport_Card, viewport: c.Rect) -> (c.Approve_Transport, bool) {
+    if !input.focused || !input.click || input.back || input.right_pressed || input.right_released { return {}, false }
+    if !contains(viewport,input.mouse_x,input.mouse_y) { return {}, false }
+    for card in cards {
+        if card.approve_id == 0 || card.approve_bounds.width <= 0 { continue }
+        if contains(card.approve_bounds,input.mouse_x,input.mouse_y) { return {id=card.approve_id}, true }
+    }
+    return {}, false
+}

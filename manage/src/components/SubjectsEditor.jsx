@@ -9,7 +9,23 @@ import SubjectRoleAssignments from './SubjectRoleAssignments.jsx';
 import { clone, isPlainObject, moveItem, objectItems, rgbToHex, uniqueName } from '../lib/object.js';
 
 function newSubject(id) {
-  return { id, sprite: '', width: 1, height: 1, name_key: `subject_${id}_name`, color: { r: 200, g: 200, b: 200 }, rest_time: 0, work_time: 0, roles: null, needs: [], produces: [] };
+  return {
+    id,
+    sprite: '',
+    width: 64,
+    height: 64,
+    name_key: `subject_${id}_name`,
+    color: { r: 200, g: 200, b: 200 },
+    rest_time: 0,
+    work_time: 0,
+    extra_work_time: 0,
+    min_work_health: 0.4,
+    min_colony_health: 0.1,
+    health_rates: { work_gain_per_hour: 0, rest_gain_per_hour: 0, extra_work_loss_per_hour: 0, max_inactivity_loss_per_hour: 0, inactivity_max_time: 0, station_recovery_per_hour: 0 },
+    roles: null,
+    needs: [],
+    produces: [],
+  };
 }
 
 /** Subjects in level files that reference a subject type id. */
@@ -26,6 +42,8 @@ const hostsOf = (buildings, id) => objectItems(buildings).filter((b) => isPlainO
 function SubjectForm({ index, subject, data, onChange, ctx }) {
   const resources = objectItems(ctx.resources);
   const set = (field, value) => onChange({ ...subject, [field]: value }, `${index}.${field}`);
+  const rates = isPlainObject(subject.health_rates) ? subject.health_rates : {};
+  const setRate = (field, value) => onChange({ ...subject, health_rates: { ...rates, [field]: value } }, `${index}.health_rates.${field}`);
   const unitOf = (id) => ctx.texts?.[resources.find((r) => r.id === id)?.unit_type_key] ?? 'unit';
 
   const renameId = (next) => {
@@ -59,7 +77,7 @@ function SubjectForm({ index, subject, data, onChange, ctx }) {
           <PathInput value={subject.sprite} onChange={(v) => set('sprite', v)} />
         </Field>
         {['width', 'height'].map((field) => (
-          <Field key={field} label={`${field} (world units)`} hint="Positive dimension; catalog metadata only." error={typeof subject[field] === 'number' && Number.isFinite(Math.fround(subject[field])) && Math.fround(subject[field]) > 0 ? null : 'Must be a finite positive f32'}>
+          <Field key={field} label={`${field} (pixels)`} hint="Positive pixel dimension at 100% zoom; catalog metadata only." error={typeof subject[field] === 'number' && Number.isFinite(Math.fround(subject[field])) && Math.fround(subject[field]) > 0 ? null : 'Must be a finite positive f32'}>
             <NumberInput value={subject[field]} onChange={(v) => set(field, v)} />
           </Field>
         ))}
@@ -75,8 +93,35 @@ function SubjectForm({ index, subject, data, onChange, ctx }) {
         <Field label="Work time" hint="Consecutive hours it can work (≥ 0)" error={subject.work_time < 0 ? 'Must be ≥ 0' : null}>
           <NumberInput value={subject.work_time} min={0} onChange={(v) => set('work_time', v)} />
         </Field>
+        <Field label="Extra work time" hint="Maximum overtime hours after work_time (≥ 0)" error={subject.extra_work_time < 0 ? 'Must be ≥ 0' : null}>
+          <NumberInput value={subject.extra_work_time} min={0} onChange={(v) => set('extra_work_time', v)} />
+        </Field>
+        <Field label="Min work health" hint="Health floor to start or continue work; 0 < value ≤ 1 and above min colony health">
+          <NumberInput value={subject.min_work_health} min={0} onChange={(v) => set('min_work_health', v)} />
+        </Field>
+        <Field label="Min colony health" hint="Medical evacuation threshold; 0 ≤ value < min work health">
+          <NumberInput value={subject.min_colony_health} min={0} onChange={(v) => set('min_colony_health', v)} />
+        </Field>
       </div>
-      <SubjectRoleAssignments key={index} value={subject.roles} ctx={ctx} onChange={(value, field) => onChange({ ...subject, roles: value }, `${index}.roles${field ? `.${field}` : ''}`)} />
+      <fieldset className="recipe">
+        <legend>Health rates</legend>
+        <p className="hint">Nonnegative hourly magnitudes; logic decides gain or loss and clamps health to [0,1].</p>
+        <div className="form-grid">
+          {[
+            ['work_gain_per_hour', 'Work gain / hour'],
+            ['rest_gain_per_hour', 'Rest gain / hour'],
+            ['extra_work_loss_per_hour', 'Extra work loss / hour'],
+            ['max_inactivity_loss_per_hour', 'Max inactivity loss / hour'],
+            ['inactivity_max_time', 'Inactivity max time (hours)'],
+            ['station_recovery_per_hour', 'Station recovery / hour'],
+          ].map(([field, label]) => (
+            <Field key={field} label={label} error={typeof rates[field] === 'number' && Number.isFinite(Math.fround(rates[field])) && rates[field] >= 0 ? null : 'Must be a finite nonnegative number'}>
+              <NumberInput value={rates[field]} min={0} onChange={(v) => setRate(field, v)} />
+            </Field>
+          ))}
+        </div>
+      </fieldset>
+      <SubjectRoleAssignments key={index} value={subject.roles} subjectSprite={subject.sprite} ctx={ctx} onChange={(value, field) => onChange({ ...subject, roles: value }, `${index}.roles${field ? `.${field}` : ''}`)} />
       <div className="form-split">
         <RecipeList
           title="Needs"
@@ -87,6 +132,8 @@ function SubjectForm({ index, subject, data, onChange, ctx }) {
           extraFields={[
             { field: 'shortage_alert_time', label: 'Shortage alert (hours before complaining)' },
             { field: 'shortage_max_time', label: 'Shortage max (hours before dying/shutdown)' },
+            { field: 'satisfied_health_gain_per_hour', label: 'Satisfied health gain / hour' },
+            { field: 'max_shortage_health_loss_per_hour', label: 'Max shortage health loss / hour' },
           ]}
           resources={resources}
           onChange={(v) => set('needs', v)}

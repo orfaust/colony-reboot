@@ -8,29 +8,25 @@ import "../logic"
 sprite_paths :: proc(catalog: config.Catalog) -> []string {
     paths := make([dynamic]string, context.temp_allocator)
     for building in catalog.buildings { if building.sprite != "" { append(&paths, building.sprite) } }
-    for role in catalog.subject_roles { if role.sprite != "" { append(&paths, role.sprite) } }
     for subject in catalog.subjects {
+        if subject.sprite != "" { append(&paths, subject.sprite) }
         for role in subject.roles { if role.sprite != "" { append(&paths, role.sprite) } }
     }
     return paths[:]
 }
 
-// Subject-type sprite paths are currently metadata only. The first declared role with a sprite supplies
-// their icon; role order is presentation-only and does not alter job eligibility.
-subject_sprite_definitions :: proc(roles: []logic.Subject_Role_Definition, catalog: config.Catalog) -> string {
-    for definition in roles {
-        if definition.sprite != "" { return definition.sprite }
-        if role, found := logic.find_role(catalog.subject_roles, logic.subject_role_id(definition.role_id)); found && role.sprite != "" { return role.sprite }
-    }
-    return ""
+// Subject presentation uses only the subject type and its per-role overrides; the
+// role catalog supplies identity metadata, never assets. Role order is cosmetic and
+// does not alter job eligibility. An empty result means the caller falls back to the
+// subject type color.
+subject_sprite_definitions :: proc(definitions: []logic.Subject_Role_Definition, fallback: string) -> string {
+    for definition in definitions { if definition.sprite != "" { return definition.sprite } }
+    return fallback
 }
 
-subject_sprite :: proc(roles: []logic.Subject_Role, catalog: config.Catalog, definitions: []logic.Subject_Role_Definition = nil) -> string {
+subject_sprite :: proc(roles: []logic.Subject_Role, definitions: []logic.Subject_Role_Definition, fallback: string) -> string {
     for job in roles {
         for definition in definitions { if definition.role_id == job && definition.sprite != "" { return definition.sprite } }
-        if role, found := logic.find_role(catalog.subject_roles, logic.subject_role_id(job)); found && role.sprite != "" {
-            return role.sprite
-        }
     }
-    return ""
+    return fallback
 }

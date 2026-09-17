@@ -16,6 +16,8 @@ Scene_State :: struct {
     inspected_id: string, // Borrows a stable startup building ID, never a snapshot pointer.
     info_anchor, right_origin: c.Vector2,
     right_pending: bool,
+    modal: c.Modal_Kind, // Open overview grid, if any; toggles switch it.
+    modal_scroll: int,
 }
 
 // Chronological bounded log. Overflow drops the oldest entry; repeated warnings
@@ -51,7 +53,7 @@ notice_view :: proc(state: ^Scene_State, width, height: f32, wrapped_rows: int =
     margin := min(f32(16), min(width,height)/2)
     // Retain the original minimum height; measured wrapping may grow the panel.
     panel_height := min(max(f32(144),f32(wrapped_rows)*c.INFO_ROW_HEIGHT+2*c.INFO_PADDING), max(f32(0), height-2*margin))
-    view := c.Notice_View{bounds={margin, height-margin-panel_height, max(f32(0),width-2*margin), panel_height}}
+    view := c.Notice_View{bounds={margin, height-margin-panel_height, notice_panel_width(width), panel_height}}
     view.count = min(state.notice_count, c.NOTICE_VISIBLE_ROWS)
     padding := min(f32(8), panel_height/2)
     row_height := (panel_height-2*padding)/f32(c.NOTICE_VISIBLE_ROWS)
@@ -106,7 +108,11 @@ scene_command :: proc(input: c.Input, targets: []c.Building_Target, notice: c.No
     return {}, false
 }
 
-// Overlays consume pointer input even while empty.
+// Overlays consume pointer input even while empty; an open modal consumes everything.
 over_overlay :: proc(input: c.Input, notice: c.Notice_View, hud: c.Hud_View) -> bool {
+    if hud.modal.kind != .None { return true }
+    for toggle in hud.toggles {
+        if contains(toggle.bounds, input.mouse_x, input.mouse_y) { return true }
+    }
     return contains(hud.transport_bounds, input.mouse_x, input.mouse_y) || contains(notice.bounds, input.mouse_x, input.mouse_y) || contains(hud.bounds, input.mouse_x, input.mouse_y) || contains(hud.station_bounds, input.mouse_x, input.mouse_y) || contains(hud.info_bounds, input.mouse_x, input.mouse_y)
 }

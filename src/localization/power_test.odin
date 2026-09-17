@@ -10,7 +10,7 @@ power_text_requires_templates_and_notices :: proc(t: ^testing.T) {
     mem.dynamic_arena_init(&arena, alignment=64)
     defer mem.dynamic_arena_destroy(&arena)
     allocator := mem.dynamic_arena_allocator(&arena)
-    source :: #load("../../assets/localization/en.json")
+    source :: #load("../../assets/config/default/localization/en.json")
     text, ok := decode(transmute([]byte)source, allocator)
     testing.expect(t, ok)
     missing_placeholder, _ := strings.replace_all(string(source), "{value}", "", allocator)
@@ -28,6 +28,16 @@ power_text_requires_templates_and_notices :: proc(t: ^testing.T) {
     missing_clock_key, _ := strings.replace_all(string(source), "hud_clock_format", "unused_text", allocator)
     _, clock_key_ok := decode(transmute([]byte)missing_clock_key, allocator)
     testing.expect(t, !clock_key_ok)
+    // Building-specific notices must declare both the localized type name and the
+    // level instance ID, never the obsolete short catalog code.
+    for key in ([?]string{"notice_staffing_lost", "notice_staffing_restored", "notice_insufficient_power", "notice_insufficient_health", "notice_always_on_locked", "notice_generator_required"}) {
+        for placeholder in ([?]string{"{name}", "{id}"}) {
+            without, _ := strings.replace_all(text.entries[key], placeholder, "", allocator)
+            mutated, _ := strings.replace_all(string(source), text.entries[key], without, allocator)
+            _, placeholder_ok := decode(transmute([]byte)mutated, allocator)
+            testing.expectf(t, !placeholder_ok, "%s without %s", key, placeholder)
+        }
+    }
     for key in keys {
         testing.expect(t, text.entries[key] != "")
         missing, _ := strings.replace_all(string(source), key, "unused_text", allocator)

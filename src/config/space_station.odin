@@ -39,10 +39,13 @@ decode_ships :: proc(data: []byte, subjects: []logic.Subject_Type, texts: map[st
         }
         if err := text_error(definition.name_key, texts, allocator); err != "" { return nil, err }
         if definition.width <= 0 || definition.height <= 0 {
-            return nil, fmt.aprintf("ships[%d]: width and height must be positive world-unit dimensions", i, allocator=allocator)
+            return nil, fmt.aprintf("ships[%d]: width and height must be positive pixel dimensions", i, allocator=allocator)
         }
         if definition.sprite != "" && !valid_sprite_path(definition.sprite) {
             return nil, fmt.aprintf("ships[%d].sprite: expected a normalized assets/.../*.png path", i, allocator=allocator)
+        }
+        if !logic.valid_ship_type(definition.type) {
+            return nil, fmt.aprintf("ships[%d].type: expected one of: %s, %s", i, logic.Ship_Type_Transport, logic.Ship_Type_Emergency, allocator=allocator)
         }
         if definition.max_speed < 0 {
             return nil, fmt.aprintf("ships[%d]: max_speed must be nonnegative (km/h)", i, allocator=allocator)
@@ -57,7 +60,7 @@ decode_ships :: proc(data: []byte, subjects: []logic.Subject_Type, texts: map[st
             found := false
             for subject in subjects { if subject.id == passenger.subject_id { found = true; break } }
             if !found {
-                return nil, fmt.aprintf("ships[%d].subjects[%d]: unknown subject_id %q; define it in assets/config/subjects.json", i, j, passenger.subject_id, allocator=allocator)
+                return nil, fmt.aprintf("ships[%d].subjects[%d]: unknown subject_id %q; define it in subjects.json", i, j, passenger.subject_id, allocator=allocator)
             }
             if passenger.capacity < 0 {
                 return nil, fmt.aprintf("ships[%d].subjects[%d]: capacity must be nonnegative", i, j, allocator=allocator)
@@ -86,7 +89,7 @@ resolve_station :: proc(definition: Station_Data, catalog: Catalog, texts: map[s
     if err := text_error(definition.name_key, texts, allocator); err != "" { return {}, err }
     for stock, i in definition.resources {
         if !resource_exists(catalog.resources, stock.resource_id) {
-            return {}, fmt.aprintf("resources[%d]: unknown resource_id %q; define it in assets/config/resources.json", i, stock.resource_id, allocator=allocator)
+            return {}, fmt.aprintf("resources[%d]: unknown resource_id %q; define it in resources.json", i, stock.resource_id, allocator=allocator)
         }
         if !logic.valid_station_stock(0, stock.capacity, 0) {
             return {}, fmt.aprintf("resources[%d]: capacity must be finite and nonnegative", i, allocator=allocator)
@@ -101,7 +104,7 @@ resolve_station :: proc(definition: Station_Data, catalog: Catalog, texts: map[s
         found := false
         for subject in catalog.subjects { if subject.id == stock.subject_id { found = true; break } }
         if !found {
-            return {}, fmt.aprintf("subjects[%d]: unknown subject_id %q; define it in assets/config/subjects.json", i, stock.subject_id, allocator=allocator)
+            return {}, fmt.aprintf("subjects[%d]: unknown subject_id %q; define it in subjects.json", i, stock.subject_id, allocator=allocator)
         }
         if !logic.valid_station_stock(0, stock.capacity, 0) {
             return {}, fmt.aprintf("subjects[%d]: capacity must be finite and nonnegative", i, allocator=allocator)
@@ -116,7 +119,7 @@ resolve_station :: proc(definition: Station_Data, catalog: Catalog, texts: map[s
         found := false
         for ship in catalog.ships { if ship.id == stock.ship_id { found = true; break } }
         if !found {
-            return {}, fmt.aprintf("ships[%d]: unknown ship_id %q; define it in assets/config/ships.json", i, stock.ship_id, allocator=allocator)
+            return {}, fmt.aprintf("ships[%d]: unknown ship_id %q; define it in ships.json", i, stock.ship_id, allocator=allocator)
         }
         if stock.units < 0 { return {}, fmt.aprintf("ships[%d]: units must be a nonnegative integer", i, allocator=allocator) }
         for previous in definition.ships[:i] {
@@ -152,15 +155,15 @@ decode_space_stations :: proc(data: []byte, catalog: Catalog, texts: map[string]
 }
 
 @(private)
-load_space_stations :: proc(catalog: ^Catalog, texts: map[string]string, allocator: mem.Allocator) -> bool {
-    ships_path :: "assets/config/ships.json"
+load_space_stations :: proc(catalog: ^Catalog, texts: map[string]string, allocator: mem.Allocator, profile: Profile) -> bool {
+    ships_path := profile_path(profile, "ships.json", allocator)
     data, ok := os.read_entire_file(ships_path)
     if !ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", ships_path); return false }
     defer delete(data)
     ships, error := decode_ships(data, catalog.subjects, texts, allocator)
     if error != "" { fmt.eprintf("Invalid %s: %s\n", ships_path, error); return false }
     catalog.ships = ships
-    station_path :: "assets/config/space_stations.json"
+    station_path := profile_path(profile, "space_stations.json", allocator)
     station_data, station_ok := os.read_entire_file(station_path)
     if !station_ok { fmt.eprintf("Cannot read %s. Run from the repository root.\n", station_path); return false }
     defer delete(station_data)

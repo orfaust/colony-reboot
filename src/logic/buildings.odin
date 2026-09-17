@@ -11,19 +11,19 @@ Resource :: struct {
     name_key, description_key, unit_type_key: string,
     color: c.RGB,
 }
-// JSON specifies exactly one amount (config "one_of" group); the absent one decodes as zero.
+// JSON specifies exactly one amount (config "one_of" group). Per-capita consumption
+// is modelled only by subject needs; the obsolete building `amount_per_resident`
+// rate was removed in the building production plan.
 Need :: struct {
     resource_id: string,
     amount_per_unit: f32 `config:"one_of"`, // Resource units consumed per unit of product.
     amount_per_hour: f32 `config:"one_of"`, // Resource units consumed per hour of operation.
-    amount_per_resident: f32 `config:"one_of"`, // Resource units consumed per resident per hour.
     capacity: f32, // Units of this resource the building can hold.
 }
-// JSON specifies exactly one rate (config "one_of" group); the absent one decodes as zero.
+// JSON specifies exactly one rate (config "one_of" group): `units_per_hour`.
 Product :: struct {
     resource_id: string,
     units_per_hour: f32 `config:"one_of"`, // Resource units produced per hour.
-    amount_per_resident: f32 `config:"one_of"`, // Units produced per resident per hour; requires residents.
     capacity: f32, // Units the producing building can hold.
 }
 // Subjects hold no stock: their products have no capacity or stored amount.
@@ -46,17 +46,23 @@ Residents :: struct {
     type: string,
     capacity: f32,
 }
+// Staffing intent for a building role entry. `continuous` keeps every slot covered
+// while the building is enabled; `on_demand` waits for a future explicit request.
+Staffing_Mode :: enum {
+    continuous,
+    on_demand,
+}
 Building_Subject_Role :: struct {
     role_id: Subject_Role,
-    quantity: f32, // Finite nonnegative subject count; fractional metadata remains supported.
-    required: bool, // Required versus optional staffing; simulation enforcement is not implemented.
+    quantity: int, // Nonnegative number of individual slots (integer, never fractional).
+    staffing_mode: Staffing_Mode, // Replaces the former `required` boolean.
 }
 Building_Type :: struct {
     id: c.Building_Type_ID,
     name_key, description_key: string,
     sprite: string `config:"optional"`, // Borrowed PNG path; absent/empty uses color, never a GPU resource.
     code: string,
-    width, height: f32, // World units; position identifies the center.
+    width, height: f32, // Pixel dimensions at 100% zoom; position identifies the center.
     color: c.RGB,
     power_need_kw, power_output_kw: f32,
     always_on: bool, // Must never be switched off; validated level instances start enabled.
@@ -77,8 +83,15 @@ Building_Instance :: struct {
     health: f32,
     repairing: bool,
     enable_at_start: bool, // Active when a session starts; Control Units always are.
-    stored: []Stored_Resource, // Borrowed immutable level metadata; production is not simulated yet.
+    stored: []Stored_Resource, // Borrowed immutable level metadata; seeds and restores the runtime stock table.
     residents_amount: Maybe(f32), // Residents living here: set only when the type has residents (JSON null otherwise).
+}
+
+// A continuous entry with at least one slot backs a staffing slot that startup
+// validation may reference through an initial assignment. Zero-quantity entries
+// and on-demand entries have no automatic slot yet.
+has_continuous_slot :: proc(definition: Building_Type, role_id: Subject_Role) -> bool {
+    return continuous_role_quantity(definition,role_id) > 0
 }
 
 valid_instance :: proc(instance: Building_Instance) -> bool {
@@ -111,7 +124,31 @@ State :: struct {
     // toward `active` on each tick, over warmup_hours up and cooldown_hours down.
     // Consumption does not ramp: active or still-cooling buildings draw full need.
     level: []f64,
+    // Materialized continuous staffing slots and their derived coverage. Slots are
+    // rebuilt from the same level template on reset; claims are cleared by reset
+    // and rebuilt by derive_staffing from the authoritative subject state.
+    staffing: Staffing,
+    // Owned per-instance runtime stock, flat like the staffing table: `stock_first`
+    // is a len(buildings)+1 prefix index into `stock`, which holds the resolved
+    // resource entries in level order, then configured need/product/storage order.
+    // Allocated by new_session, restored by reset without allocating and freed by
+    // destroy; amounts are seeded from the immutable level `stored` template.
+    stock_first: []int,
+    stock: []Stock_Entry,
+    // Borrowed immutable recipe metadata per instance, resolved once at session
+    // creation (see production.odin). `produces[0]` is the reference product for
+    // every `amount_per_unit` need; the slices must outlive the session.
+    recipes: []Recipe,
+    // Edge-triggered accounting for the hourly production step: true while the
+    // building is operational but skipping hours for a missing input. Restored to
+    // false by reset and freed by destroy; no allocation after construction.
+    production_blocked: []bool,
+    // Shift scheduler bookkeeping: rotating cursors and deferral accounting.
+    scheduler: Scheduler,
     clock: Clock,
+    // Edge-triggered transition log for the application. Fixed capacity and
+    // allocation-free; see events.odin for delivery order and overflow behavior.
+    events: Event_Queue,
 }
 Power :: struct { output_kw, need_kw: f64 }
 Timing :: struct { warmup_hours, cooldown_hours: f64 }
@@ -132,6 +169,10 @@ new_session :: proc(initial: []Building_Instance, definitions: []Building_Type, 
         found := false
         for definition in definitions {
             if definition.id == building.building_id {
+                // Startup validation guarantees these two invariants; a fixture that
+                // breaks them would silently change toggle and load-shedding behavior.
+                assert(definition.power_need_kw == 0 || definition.power_output_kw == 0)
+                assert(!definition.always_on || definition.power_need_kw == 0)
                 state.power[i] = {f64(definition.power_output_kw), f64(definition.power_need_kw)}
                 state.always_on[i] = definition.always_on
                 state.min_operative_health[i] = definition.min_operative_health
@@ -142,8 +183,16 @@ new_session :: proc(initial: []Building_Instance, definitions: []Building_Type, 
         }
         assert(found) // Startup validation resolves every level building_id.
     }
+    assert(continuous_slot_count(initial,definitions) <= STAFFING_SLOT_LIMIT) // Config rejects larger levels.
+    assert(stock_entry_count(initial,definitions) <= STOCK_ENTRY_LIMIT) // Config rejects larger levels.
+    materialize_staffing(&state.staffing,initial,definitions,allocator)
+    materialize_stock(&state,initial,definitions,allocator)
+    materialize_recipes(&state,initial,definitions,allocator)
     reset(&state, initial)
-    assert(balance(&state).available_kw >= 0) // Config rejects an invalid initial network.
+    // Config rejects an invalid initial network; coverage is derived from the level's
+    // initial assignments after construction, so this assertion checks the configured
+    // quantities before the runtime staffing gate can apply.
+    assert(power_balance(&state,false).available_kw >= 0)
     return state
 }
 
@@ -156,6 +205,9 @@ destroy :: proc(state: ^State, allocator: mem.Allocator) {
     delete(state.min_operative_health, allocator)
     delete(state.timing, allocator)
     delete(state.level, allocator)
+    destroy_staffing(&state.staffing,allocator)
+    destroy_stock(state,allocator)
+    destroy_recipes(state,allocator)
     state^ = {}
 }
 
@@ -168,7 +220,13 @@ reset :: proc(state: ^State, initial: []Building_Instance) {
         state.active[i] = starts_active(building)
         state.level[i] = state.active[i] ? 1 : 0
     }
+    // Runtime stock is restored from the copied level template without allocating.
+    reset_stock(state)
+    for &blocked in state.production_blocked { blocked = false }
     state.clock = {}
+    state.events = {}
+    clear_staffing_claims(&state.staffing)
+    state.scheduler = {}
 }
 
 // Advances every warmup/cooldown by one clock tick. Call once per tick from
@@ -194,8 +252,10 @@ ramp_toward :: proc(level, target, hours: f64) -> f64 {
 }
 
 // Returned values cannot mutate authoritative state. IDs borrow configuration storage.
-// Output remains ramped. Energized means active or not yet fully cooled; it
-// controls full electrical demand and presentation, not command/request eligibility.
+// Output is ramped and gated by staffing: an enabled building whose continuous slots
+// are not fully covered produces nothing. Energized means active or not yet fully
+// cooled; it controls full electrical demand and presentation, not command/request
+// eligibility, and it is never gated by staffing.
 energized :: proc(state: ^State, index: int) -> bool {
     return state.active[index] || state.level[index] > 0
 }
@@ -205,16 +265,30 @@ snapshot :: proc(state: ^State, index: int) -> c.Building_Snapshot {
     power := state.power[index]
     level := state.level[index]
     active := state.active[index]
+    is_energized := energized(state,index)
     return {id=b.id, building_id=b.building_id, position=b.position, health=b.health, repairing=b.repairing,
-        active=active, energized=energized(state,index), level=level, power_output_kw=power.output_kw*level,
-        power_need_kw=energized(state,index) ? power.need_kw : 0}
+        active=active, staffed=building_staffed(state,index), energized=is_energized, level=level,
+        power_output_kw=building_output_gated(state,index) ? 0 : power.output_kw*level,
+        power_need_kw=is_energized ? power.need_kw : 0}
 }
 
-// Instantaneous kW balance with ramped output, not stored energy in kWh.
+// Instantaneous kW balance with ramped output, not stored energy in kWh. An enabled
+// building whose continuous staffing is not fully covered produces nothing while it
+// keeps consuming its full demand. Staffing loss can therefore make the balance
+// negative; `step_load_shedding` resolves it in the same tick by force-stopping the
+// greatest active consumer, unless no eligible building remains. Disabled buildings
+// still cooling are not affected by the gate and are never shed candidates.
 balance :: proc(state: ^State) -> c.Power_Balance {
+    return power_balance(state,true)
+}
+
+// The same summation without the staffing gate: the configured network that startup
+// validation checks before any coverage has been derived.
+@(private)
+power_balance :: proc(state: ^State, apply_staffing: bool) -> c.Power_Balance {
     result: c.Power_Balance
     for power, i in state.power {
-        result.produced_kw += power.output_kw*state.level[i]
+        if !apply_staffing || !building_output_gated(state,i) { result.produced_kw += power.output_kw*state.level[i] }
         if energized(state,i) { result.consumed_kw += power.need_kw }
     }
     result.available_kw = result.produced_kw - result.consumed_kw
@@ -247,12 +321,15 @@ power_shortage :: proc(produced, consumed: f64) -> bool {
 }
 
 // Commands are delivered synchronously in input order. Rejections leave all state
-// unchanged. Evaluate the entire proposed network so combined producer/consumers
-// can start from their own output. Active producers cannot be shut down, even
+// unchanged. Power attributes are mutually exclusive at startup, so a building is
+// either a producer or a consumer and no consumer can start from its own output.
+// Active producers cannot be shut down, even
 // during warmup or when damaged. Health gates activation only for other buildings.
-// Output ramps are reserved pessimistically so the ramped balance never goes negative:
-// a warming building offers only its current output (it only rises while active), and
-// a cooling building offers nothing. Need stays reserved in full until level zero.
+// Output ramps are reserved pessimistically so an accepted command never creates a
+// deficit: a warming building offers only its current output (it only rises while
+// active), a cooling building offers nothing, and a building that is (or becomes)
+// enabled without full coverage offers nothing because staffing does not change on
+// a toggle. Need stays reserved in full until level zero.
 toggle :: proc(state: ^State, command: c.Toggle_Building) -> c.Toggle_Result {
     index := -1
     for building, i in state.buildings {
@@ -270,7 +347,12 @@ toggle :: proc(state: ^State, command: c.Toggle_Building) -> c.Toggle_Result {
         enabled := state.active[i]
         if i == index { enabled = !enabled }
         if enabled {
-            produced += power.output_kw * (state.timing[i].warmup_hours <= 0 ? 1 : state.level[i])
+            output := power.output_kw * (state.timing[i].warmup_hours <= 0 ? 1 : state.level[i])
+            // The staffing gate follows the post-command enabled state: a building
+            // that remains (or becomes) enabled while not fully covered offers no
+            // output, so a command can never start a network on missing personnel.
+            if !building_staffed(state,i) { output = 0 }
+            produced += output
         }
         // Evaluate post-command demand, including every pending shutdown. Only a
         // zero-duration shutdown releases its remaining demand immediately.
